@@ -21,7 +21,7 @@
 
 为了演示光照贴图，我创建了一个简单的场景，有一个很简单的结构，带有影子，在结构里面和周围放了一些球体，所有的物体都是 Unity 的默认材质。
 
-![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/test-scene.png)
+![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/test-scene.png)  
 *烘焙测试场景*
 
 
@@ -29,7 +29,7 @@
 
 为了启用光照贴图，把唯一的光源的模式从 Realtime 改为Baked。
 
-![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/baked-light.png)
+![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/baked-light.png)  
 *烘焙主光源*
 
 把主光源设为烘焙之后，这个光源就不包括在动态光源中了，从动态物体的角度看来，这个光源就不存在了，唯一剩下基于主光源的的只有环境光。
@@ -47,7 +47,7 @@
 
 现在场景里的物体应该都正常了。这些物体不能移动，把他们标记为 static，以告诉 Unity 这些是静态物体，方法是在 Inspector 面板的右上角找到 Static 开关并勾选上。
 
-> **光源物体需要标记成 static 吗？**  
+> **光源物体需要标记成 static 吗？**    
 > 不需要，只要光源的相关设置正确就可以。
 
 静态系统有许多子系统，Static 选项有一个下拉菜单，每个物体在每个子系统中都可以微调成静态或者非静态。此处我们只关心光照贴图，最简单的方式是选择 Everything。
@@ -602,7 +602,7 @@ float4 MyLightmappingFragmentProgram (Interpolators i) : SV_TARGET {
 }
 ```
 
->**UnityMetaFragment长什么样？**
+>**UnityMetaFragment长什么样？**  
 >unity_MetaFragmentControl 变量包括了一些标记，来告诉函数是应该输出反照率还是自发光，这里还有一些编辑器效果的变体，不过我这里删掉了因为与主题无关。
 
 ```c
@@ -691,7 +691,7 @@ float4 MyLightmappingFragmentProgram (Interpolators i) : SV_TARGET {
         return UnityMetaFragment(surfaceData);
 ```
 
->**SmoothnessToRoughness怎么计算的？**
+>**SmoothnessToRoughness怎么计算的？**  
 >计算方法是1减平滑值再平方,从平滑到粗糙的平方映射能产生比线性转换更好的结果。
 ```c
 // Smoothness is the user facing name
@@ -745,7 +745,7 @@ half SmoothnessToRoughness(half smoothness) {
 
 我们也可以在 deferred pass 做同样的事情，不过我们现在使用 #pragma multi_compile_prepassfinal 指令，他会处理所有光照贴图方面的关键字以及HDR关键字。
 
->**prepass final是什么？**
+>**prepass final是什么？**  
 >Unity 4 使用的延迟渲染技术和之后的版本不一样，在 Unity 5 里改称为传统延迟渲染。这种方法的 pass 比较多，Prepass final是从那时起提出的术语。#pragma multi_compile_prepassfinal 也沿用到现在的延迟渲染中，而没有引入新指令。
 
 ```c
@@ -799,26 +799,25 @@ half SmoothnessToRoughness(half smoothness) {
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-16/directional-lightmaps/using-directional-lightmaps.png)  
 *使用带方向的光照贴图*  
 
->**DecodeDirectionalLightmap做了啥？**
+>**DecodeDirectionalLightmap做了啥？**  
 >它实际上并没有正确地计算漫反射系数，而是使用了半兰伯特算法，这种方法在表面周围有效地弯折光线，被照亮的阴影区域超出了应有的范围。这是必需的，因为烘焙的光线实际上不是来自同一方向。
-```c
-inline half3 DecodeDirectionalLightmap (
+> 
+    inline half3 DecodeDirectionalLightmap (
         half3 color, fixed4 dirTex, half3 normalWorld
-) {
-    // In directional (non-specular) mode Enlighten bakes dominant light
+    ) {
+        // In directional (non-specular) mode Enlighten bakes dominant light
         // direction in a way, that using it for half Lambert and then dividing
         // by a "rebalancing coefficient" gives a result close to plain diffuse
         // response lightmaps, but normalmapped.
 
-    // Note that dir is not unit length on purpose. Its length is
+        // Note that dir is not unit length on purpose. Its length is
         // "directionality", like for the directional specular lightmaps.
 
-    half halfLambert = dot(normalWorld, dirTex.xyz - 0.5) + 0.5;
+        half halfLambert = dot(normalWorld, dirTex.xyz - 0.5) + 0.5;
 
-    return color * halfLambert / max(1e-4h, dirTex.w);
-}
-```
-这里的代码注释提到了高光贴图，这是一种支持高光的光照贴图，但是需要更多的纹理，代价也更高，大部分情况下效果也不佳，所以从Unity5.6开始就移除了。
+        return color * halfLambert / max(1e-4h, dirTex.w);
+    } 
+>这里的代码注释提到了高光贴图，这是一种支持高光的光照贴图，但是需要更多的纹理，代价也更高，大部分情况下效果也不佳，所以从Unity5.6开始就移除了。
 
 
 # 5 光照探针
@@ -865,8 +864,10 @@ inline half3 DecodeDirectionalLightmap (
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-16/light-probes/tweaking-probes.png)  
 *调整探针*  
 
-您可以通过移动动态对象来测试探针，选中动态对象时，也会同时显示当前能影响它的探针。探针将显示其光照信息，而非黄色小球。您还可以看到用于动态对象的插值数据。
-  
+您可以通过移动动态对象来测试探针，选中动态对象时，也会同时显示当前能影响它的探针。探针将显示其光照信息，而非黄色小球。您还可以看到用于动态对象的插值数据。  
+
+![](https://thumbs.gfycat.com/PreciousFaintGalapagosdove-mobile.mp4)  
+**  
   
 下一课是[混合光照](https://catlikecoding.com/unity/tutorials/rendering/part-17/)。
 
