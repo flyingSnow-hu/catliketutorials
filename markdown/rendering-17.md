@@ -39,14 +39,15 @@
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/mixed-light.png)  
 *混合模式的主光源*  
 
-将主方向光修改为混合模式后，会发生两件事。首先，Unity 会再次烘焙光照贴图，这次，它只会存储间接光，因此生成的光照贴图会比以前暗很多。
+将主方向光修改为混合模式后，会发生两件事。  
+首先，Unity 会再次烘焙光照贴图，这次，它只会存储间接光，因此生成的光照贴图会比以前暗很多。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/lightmap-baked.png)  
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/lightmap-indirect.png)  
 *完全烘焙 vs. 只有间接光的光照贴图*
 
-其次，所有如题都会被照亮，如同主光源被设置为实时一样。但有一点不同：向静态物体添加间接光是通过光照贴图，而不是球谐或探针。动态物体仍然通过光照探针来获得间接光。
+其次，所有物体都会被照亮，如同主光源被设置为实时一样。但有一点不同：向静态物体添加间接光是通过光照贴图，而不是球谐或探针。动态物体仍然通过光照探针来获得间接光。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/mixed-lighting.png)  
 *混合光照，实时的直接光加上烘焙的间接光*  
@@ -109,7 +110,7 @@ Interpolators MyVertexProgram (VertexData v) {
 }
 ```
 > **UNITY_INITIALIZE_OUTPUT 都做了什么？**
-> 它只是将 0 赋值给变量，并转换为正确的类型。当支持它时它做了这些，否则它什么都不做。
+> 当支持它时，它只是将 0 赋值给变量，并转换为正确的类型。它不受支持时候什么都不做。
 ```c
 // Initialize arbitrary structure with zero values.
 // Not supported on some backends
@@ -130,9 +131,9 @@ Interpolators MyVertexProgram (VertexData v) {
 我们现在正确使用了新的宏，但我们主光源的阴影仍然不会像应有的那样衰减。 事实证明，当同时使用方向阴影和光照贴图时，UNITY_LIGHT_ATTENUATION 不会计算此衰减，主方向光设为混合模式之后情况就是如此， 所以我们必须手动完成。
 
 > **这种情况下为什么不会衰减呢？**  
-> UNITY_LIGHT_ATTENUATION 宏曾经是可以独立使用的，但自 Unity 5.6 以来，它被假定应该与 Unity 的标准全局光照一起使用。我们没有按照其方法使用，因此它无法工作。
+> UNITY_LIGHT_ATTENUATION 宏曾经是可以独立使用的，但自 Unity 5.6 以来，它被设计为与 Unity 的标准全局光照一起使用，而我们没有按照设计使用，因此它无法工作。
 > 
-> 至于为何进行此更改，唯一真实线索是 AutoLight 中的注释，其中写到：“出于性能原因，在 GI 函数中处理深度中的阴影”。 由于着色器编译器随意移动代码，这等于什么也没有告诉我们。 即使这个特殊情况有一个充分的理由，也是很难找到，因为 Unity 的着色器代码已经变得非常纠结。所以，我不知道。
+> 至于为何进行此更改，唯一的线索是 AutoLight 中的注释，其中写到：“handles shadows in the depths of the GI function for performance reasons”（出于性能原因，在 GI 函数中处理深度中的阴影）。 由于着色器编译器随意移动代码，这等于什么也没有告诉我们。 即使这个特殊情况有一个充分的理由，也是无从查证，因为 Unity 的着色器代码已经变得非常纠结。所以，我不知道。
 
 对于我们的延迟光照着色器，我们已经有代码来计算阴影衰减。将相关代码片段从 MyDeferredShading 复制到 My Lighting 中的一个新函数。 唯一真正的区别是我们必须从观察矢量和观察矩阵构造 viewZ，只有 Z 分量是真正需要的，因此我们不需要执行全矩阵乘法。
 
@@ -161,7 +162,7 @@ UnityLight CreateLight (Interpolators i) {
 }
 ```
 
-但是只有当 UNITY_LIGHT_ATTENUATION 决定跳过衰减时才能手动计算衰减。UnityShadowLibrary 文件中定义了 HANDLE_SHADOWS_BLENDING_IN_GI 时就是标识这种情况。因此，只有定义了 HANDLE_SHADOWS_BLENDING_IN_GI 时，FadeShadows 才能执行操作。
+但是只有当 UNITY_LIGHT_ATTENUATION 决定跳过衰减时才能手动计算衰减。UnityShadowLibrary 文件中定义了 HANDLE_SHADOWS_BLENDING_IN_GI 就是标识这种情况。因此，只有定义了 HANDLE_SHADOWS_BLENDING_IN_GI 时，FadeShadows 才能执行操作。
 
 ```c
 float FadeShadows (Interpolators i, float attenuation) {
@@ -182,7 +183,7 @@ float FadeShadows (Interpolators i, float attenuation) {
 
 # 2 使用阴影遮罩
 
-烘焙间接光混合模式光源非常昂贵。它们需要与实时光源一样多的工作，再加上间接光源的光照贴图。混合模式与全烘焙相比，最重要的是增加了实时阴影。幸运的是，有一种方法可以将阴影烘焙到光照贴图中，并结合实时阴影，要启用此功能，请将混合光照模式更改为 Shadowmask。
+烘焙间接光混合模式光源非常昂贵，它们需要与实时光源一样多的工作，再加上间接光源的光照贴图。混合模式与全烘焙相比，最重要的是增加了实时阴影。幸运的是，有一种方法可以将阴影烘焙到光照贴图中，并结合实时阴影，要启用此功能，请将混合光照模式更改为 Shadowmask。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/shadowmask-mode.png)  
 *阴影遮罩模式*  
