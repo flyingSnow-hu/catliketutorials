@@ -183,8 +183,104 @@ float FadeShadows (Interpolators i, float attenuation) {
 
 # 2 使用阴影遮罩
 
-烘焙间接光混合模式光源非常昂贵，它们需要与实时光源一样多的工作，再加上间接光源的光照贴图。混合模式与全烘焙相比，最重要的是增加了实时阴影。幸运的是，有一种方法可以将阴影烘焙到光照贴图中，并结合实时阴影，要启用此功能，请将混合光照模式更改为 Shadowmask。
+烘焙间接光加混合模式光源非常昂贵，它们的运算量与实时光源一样多，还要加上间接光源的光照贴图，而混合模式与全烘焙相比，最重要的就是增加了实时阴影。幸运的是，有一种方法可以将阴影烘焙到光照贴图中，并结合实时阴影，要启用此功能，请将混合光照模式更改为 Shadowmask。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/shadowmask-mode.png)  
 *阴影遮罩模式*  
 
+在此模式下，混合光的间接光照和阴影衰减都存储在光照贴图中，而阴影存储在单独的一张贴图中，称为阴影遮罩。当仅使用主方向光时，所有被照亮的东西都会在阴影遮罩中显示为红色，它是红色的，因为阴影信息存储在纹理的 R 通道中。实际上，一张贴图最多可以存储四个光源的阴影，因为它有四个通道。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/shadowmask.png)  
+*烘焙的强度图和阴影遮罩*  
+
+Unity创建了阴影遮罩后，静态对象投射的阴影将消失，只有光照探针仍然需要考虑它们。 动态对象的阴影不受影响。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/no-baked-shadows.png)  
+*烘焙的阴影消失了*  
+
+
+## 2.1 对阴影遮罩采样
+
+为了获得烘焙的阴影，我们必须对阴影遮罩采样。Unity 的宏已经为点光源和聚光灯做了这个工作，但我们也必须将它包含在我们的 FadeShadows 函数中。我们可以使用 UnityShadowLibrary 中的 UnitySampleBakedOcclusion 函数。，它需要光照贴图UV坐标和世界位置作为参数。
+
+```c
+float FadeShadows (Interpolators i, float attenuation) {
+	#if HANDLE_SHADOWS_BLENDING_IN_GI
+		…
+		float bakedAttenuation =
+			UnitySampleBakedOcclusion(i.lightmapUV, i.worldPos);
+		attenuation = saturate(attenuation + shadowFade);
+	#endif
+	return attenuation;
+}
+```
+
+> UnitySampleBakedOcclusion 都做了什么？
+> 它使用光照贴图坐标对阴影遮罩进行采样，然后选择适当的通道。 unity_OcclusionMaskSelector 变量是一个向量，其中的某个分量被设置为1，与当前被着色的光源匹配。
+```c
+fixed UnitySampleBakedOcclusion (float2 lightmapUV, float3 worldPos) {
+    #if defined (SHADOWS_SHADOWMASK)
+        #if defined(LIGHTMAP_ON)
+            fixed4 rawOcclusionMask = UNITY_SAMPLE_TEX2D_SAMPLER(
+				unity_ShadowMask, unity_Lightmap, lightmapUV.xy
+			);
+        #else
+			fixed4 rawOcclusionMask =
+				UNITY_SAMPLE_TEX2D(unity_ShadowMask, lightmapUV.xy);
+        #endif
+        return saturate(dot(rawOcclusionMask, unity_OcclusionMaskSelector));
+    #else
+        return 1.0;
+    #endif
+}
+```
+> 这个函数还处理光照探针代理体的衰减，但我们还没有打算支持那些东西，所以我删除了相关代码，要求世界位置作为参数也是这个原因。
+
+UnitySampleBakedOcclusion 在使用阴影遮罩时返回烘焙阴影的衰减，在其他情况下返回 1。现在我们必须将它与我们已经具有的衰减相结合，以淡化我们的阴影，这些工作可以用 UnityMixRealtimeAndBakedShadows 函数完成。
+```c
+float bakedAttenuation =
+			UnitySampleBakedOcclusion(i.lightmapUV, i.worldPos);
+//		attenuation = saturate(attenuation + shadowFade);
+		attenuation = UnityMixRealtimeAndBakedShadows(
+			attenuation, bakedAttenuation, shadowFade
+		);
+```
+
+> **UnityMixRealtimeAndBakedShadows 是如何工作的？**
+> 它也是UnityShadowLibrary中的一个函数，删除了涉及光照探针代理体和一些与我们无关的边界情况的代码。
+```c
+inline half UnityMixRealtimeAndBakedShadows (
+	half realtimeShadowAttenuation, half bakedShadowAttenuation, half fade
+) {
+	#if !defined(SHADOWS_DEPTH) && !defined(SHADOWS_SCREEN) && \
+		!defined(SHADOWS_CUBE)
+		return bakedShadowAttenuation;
+	#endif
+
+	#if defined (SHADOWS_SHADOWMASK)
+		#if defined (LIGHTMAP_SHADOW_MIXING)
+			realtimeShadowAttenuation =
+				saturate(realtimeShadowAttenuation + fade);
+			return min(realtimeShadowAttenuation, bakedShadowAttenuation);
+		#else
+			return lerp(
+				realtimeShadowAttenuation, bakedShadowAttenuation, fade
+			);
+		#endif
+	#else //no shadowmask
+		return saturate(realtimeShadowAttenuation + fade);
+	#endif
+}
+```
+> 如果没有动态阴影，则返回烘焙的衰减，这意味着不计算动态对象的阴影，以及光照贴图对象的烘焙阴影。
+> 当不使用阴影遮罩时，它会执行和我们以前一样的衰减，否则要看我们是否正在进行阴影混合，我们将在稍后介绍。 现在，它只是在实时和烘焙衰减之间进行插值。
+
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/mixed-shadows.png)  
+*实时阴影和阴影遮罩*  
+
+我们现在可以在静态对象上获得实时和烘焙阴影，并把它们正确混合。实时阴影仍会在阴影距离之外淡出，但烘焙阴影则不会。
+
+## 2.2 添加一个阴影遮罩到 G 缓冲区
+
+阴影遮罩现在可以在前向渲染下使用，如果想要在延迟渲染下使用，我们还需要做一些工作。 具体来说，我们必须在需要时将阴影遮罩信息添加为额外的 G 缓冲区，因此，在定义 SHADOWS_SHADOWMASK 时，将另一个缓冲区添加到 FragmentOutput 结构中。
