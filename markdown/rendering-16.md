@@ -15,9 +15,9 @@
 
 # 1 光照贴图
 
-计算光照是非常昂贵的过程，延迟渲染使我们可以使用很多光源，但是影子方面依然有局限性。如果我们的场景是动态的，我们就无法避免这些计算，但是如果光和物体都不变，我们可以只计算一次然后复用，这样我们就可以在场景上放很多光源，并且不需要在运行时渲染。预烘焙还有一个好处是可以使用区域光源，而实时渲染不可以。
+计算光照是非常昂贵的过程，延迟渲染使我们可以使用很多光源，但是影子方面依然有局限性。只要我们的场景是动态的，就无法避免这些计算，但是如果光和物体都不变，我们可以预计算（烘焙）一次然后反复使用，这样我们就可以在场景上放很多光源，并且不需要在运行时渲染。烘焙还有一个好处是可以使用区域光，而实时渲染不可以。
 
-光照的哪些部分要参与预计算，这个不一定，在这个教程里，我们始终会把所有部分都放进光照贴图里，所以场景上完全没有动态光照。
+光照的哪些部分要参与烘焙，这个不一定，在这一节教程里，我们会把所有部分都放进光照贴图里，所以场景上完全没有动态光源。
 
 为了演示光照贴图，我创建了一个简单的场景，有一个很简单的结构，带有影子，在结构里面和周围放了一些球体，所有的物体都是 Unity 的默认材质。
 
@@ -32,7 +32,7 @@
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/baked-light.png)  
 *烘焙主光源*
 
-把主光源设为烘焙之后，这个光源就不包括在动态光源中了，从动态物体的角度看来，这个光源就不存在了，唯一剩下基于主光源的的只有环境光。
+把主光源设为烘焙之后，这个光源就不包括在动态光源中了，从动态物体的角度看来，这个光源就不存在了，只剩环境光还是基于主光源的的。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-16/lightmapping/no-realtime-light.png)  
 *没有直接光照了*  
@@ -460,7 +460,7 @@ Pass {
 
     ENDCG
 }
-
+```
 
 现在我们来确定反照率，高光颜色，光滑度和自发光，把所需的变量和函数从 *MyLighting* 拷贝到 *MyLightmapping*。我们只需要顶点位置和 uv 坐标，法线和切线不需要，但是在顶点着色器里需要光照贴图 uv。
 
@@ -869,5 +869,8 @@ half SmoothnessToRoughness(half smoothness) {
 ![](https://thumbs.gfycat.com/PreciousFaintGalapagosdove-mobile.mp4)  
 **  
   
-下一课是[混合光照](https://catlikecoding.com/unity/tutorials/rendering/part-17/)。
+下一课是[混合光照](https://github.com/flyingSnow-hu/catliketutorials/blob/cdd9fee9668b6c4764140da1df374cb8ba00adf2/markdown/rendering-17.md)。
+
+---
+[原教程传送门](https://catlikecoding.com/unity/tutorials/rendering/part-16/) 
 
