@@ -4,7 +4,7 @@
  * 只烘焙间接光
  * 烘焙阴影和实时阴影的混合
  * 处理代码修改和错误
- * 处理减色光源
+ * 处理负光照
  
 这一篇是渲染教程的第十七部分，上一部分里我们通过光照贴图增加了对静态光照的支持，这次，我们将朝着烘焙和实时光照结合的方向前进。
 
@@ -16,16 +16,15 @@
 
 # 1.烘焙间接光
 
-光照贴图允许我们预计算光照，这会减少 GPU 必须实时完成的工作量，代价是增加了纹理所占内存，除此之外，它还增加了间接光照。但正如我们上次看到的那样，光照贴图也存在局限性：首先，高光无法烘焙；其次，烘焙光源影响动态物体仅能通过光照探针。第三，烘焙光源不会投射实时阴影。
+光照贴图允许我们预计算光照，这会减少 GPU 实时完成的工作量，代价是增加了纹理所占内存，除此之外，它还增加了间接光照。但正如我们上次看到的那样，光照贴图也存在局限性：首先，高光无法烘焙；其次，烘焙光源仅能通过光照探针影响动态物体；第三，烘焙光源不会投射实时阴影。
 
-你可以在下面的屏幕截图中看到完全实时和完全烘焙光照之间的区别。这个场景取自上一节教程，我移动了一些球体位置，并把所有球体设为动态物体， 其他物体都是静态的，渲染路径是前向渲染。
+你可以在下面的屏幕截图中看到完全实时和完全烘焙光照之间的区别。这个场景取自上一节教程，我移动了一些球体位置，并把所有球体设为动态物体，其他物体都是静态的，渲染路径是前向渲染。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/fully-realtime.png)  
-
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/fully-baked.png)  
 *完全实时和完全烘焙光照*  
 
-我没有调整光照探针，所以现在它们的位置不太明显，因为静态几何体较少，由此产生的探针光照有点偏，这使得在使用时更容易注意到。
+我没有调整光照探针，所以现在它们的位置不太明显，因为静态几何体较少，由此产生的探针光照有点偏，这使得探针在使用时更容易被注意到。
 
 ## 1.1 混合模式
 
@@ -39,11 +38,10 @@
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/mixed-light.png)  
 *混合模式的主光源*  
 
-将主方向光修改为混合模式后，会发生两件事。  
+将主方向光修改为混合模式后，会发生两件事：   
 首先，Unity 会再次烘焙光照贴图，这次，它只会存储间接光，因此生成的光照贴图会比以前暗很多。
 
-![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/lightmap-baked.png)  
-
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/lightmap-baked.png) 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/lightmap-indirect.png)  
 *完全烘焙 vs. 只有间接光的光照贴图*
 
@@ -55,18 +53,18 @@
 我们不必为了支持它而修改着色器，因为 forward base pass 已经将光照贴图数据和主方向光组合在一起。像往常一样，其余的灯可以获得 additive pass。 使用延迟渲染路径时，主灯也会获得一个 pass。
 
 >**混合光照可以在运行时动态调整吗？**  
->可以，因为它们用于实时光照，但是，他们的烘焙数据部分是静态的。所以在运行时你只能对光源进行微小调整，比如改变一点强度。过大的变化将使烘焙和实时光照之间的不同步特别明显。
+>可以，因为实时光照部分还在使用它们，但是，烘焙数据部分是静态的，所以在运行时你只能对光源进行微小调整，比如改变一点强度，过大的变化会使烘焙和实时光照之间的不一致特别明显。
 
 ## 1.2 更新着色器
 
-一开始一切似乎都很好。 然而事实证明，阴影衰减不再适用于方向光。只要大辐减少阴影距离，就容易看到阴影被切断了。
+一开始一切似乎都很好。 然而事实证明，阴影衰减不再适用于方向光。只要大幅减少阴影距离，就容易看到阴影被切断了。
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/shadows-custom.png)  
 *阴影衰减，标准着色器 vs. 我们的着色器*  
 
 Unity 曾经长时间采用一种混合光照模式，但实际上在 Unity 5 中已经无法使用这种模式了。Unity 5.6 中增加了一种新的混合光照模式，这就是我们现在使用的模式。 增加此新模式后，UNITY_LIGHT_ATTENUATION 宏背后的代码已经更改。我们在使用全烘焙或全实时光照时没有注意这一点，但我们现在必须更新代码，以使用新的混合光照。由于这是最近发生的重大变化，我们必须注意 bug。
 
-第一个要修改的是不再使用 SHADOW_COORDS 宏来定义阴影坐标的插值器，我们必须使用新的 UNITY_SHADOW_COORDS 宏。
+第一个修改是不再使用 SHADOW_COORDS 宏来定义阴影坐标的插值器，我们必须使用新的 UNITY_SHADOW_COORDS 宏。
 
 ```c
 struct Interpolators {
@@ -133,7 +131,7 @@ Interpolators MyVertexProgram (VertexData v) {
 > **这种情况下为什么不会衰减呢？**  
 > UNITY_LIGHT_ATTENUATION 宏曾经是可以独立使用的，但自 Unity 5.6 以来，它被设计为与 Unity 的标准全局光照一起使用，而我们没有按照设计使用，因此它无法工作。
 > 
-> 至于为何进行此更改，唯一的线索是 AutoLight 中的注释，其中写到：“handles shadows in the depths of the GI function for performance reasons”（出于性能原因，在 GI 函数中处理深度中的阴影）。 由于着色器编译器随意移动代码，这等于什么也没有告诉我们。 即使这个特殊情况有一个充分的理由，也是无从查证，因为 Unity 的着色器代码已经变得非常纠结。所以，我不知道。
+> 至于为何进行此更改，唯一的线索是 AutoLight 中的注释，其中写到：“handles shadows in the depths of the GI function for performance reasons”（出于性能原因，在 GI 函数中处理深度中的阴影）。 由于着色器编译器随意移动代码，这等于什么也没有告诉我们。 即使这个特殊情况有一个充分的理由，也是无从查证，因为 Unity 的着色器代码已经变得非常纠结。所以，我也不知道。
 
 对于我们的延迟光照着色器，我们已经有代码来计算阴影衰减。将相关代码片段从 MyDeferredShading 复制到 My Lighting 中的一个新函数。 唯一真正的区别是我们必须从观察矢量和观察矩阵构造 viewZ，只有 Z 分量是真正需要的，因此我们不需要执行全矩阵乘法。
 
@@ -281,6 +279,255 @@ inline half UnityMixRealtimeAndBakedShadows (
 
 我们现在可以在静态对象上获得实时和烘焙阴影，并把它们正确混合。实时阴影仍会在阴影距离之外淡出，但烘焙阴影则不会。
 
-## 2.2 添加一个阴影遮罩到 G 缓冲区
+## 2.2 添加一个阴影遮罩到 G 缓存
 
-阴影遮罩现在可以在前向渲染下使用，如果想要在延迟渲染下使用，我们还需要做一些工作。 具体来说，我们必须在需要时将阴影遮罩信息添加为额外的 G 缓冲区，因此，在定义 SHADOWS_SHADOWMASK 时，将另一个缓冲区添加到 FragmentOutput 结构中。
+阴影遮罩现在可以在前向渲染下使用，如果想要在延迟渲染下使用，我们还需要做一些工作。 具体来说，我们必须在需要时将阴影遮罩信息添加为额外的 G 缓存，因此，在定义 SHADOWS_SHADOWMASK 时，将另一个缓冲区添加到 FragmentOutput 结构中。
+
+```c
+struct FragmentOutput {
+	#if defined(DEFERRED_PASS)
+		float4 gBuffer0 : SV_Target0;
+		float4 gBuffer1 : SV_Target1;
+		float4 gBuffer2 : SV_Target2;
+		float4 gBuffer3 : SV_Target3;
+
+		#if defined(SHADOWS_SHADOWMASK)
+			float4 gBuffer4 : SV_Target4;
+		#endif
+	#else
+		float4 color : SV_Target;
+	#endif
+};
+```
+
+这是我们的第五个 G 缓存，数量已经不少了。 并非所有平台都支持它，仅当有足够的渲染目标可用时，Unity 才支持阴影遮罩，我们也应该这样做。
+
+```c
+#if defined(SHADOWS_SHADOWMASK) && (UNITY_ALLOWED_MRT_COUNT > 4)
+	float4 gBuffer4 : SV_Target4;
+#endif
+```
+
+我们现在只需将采样的阴影遮罩数据存储在 G 缓存中，因为此时我们还没有处理特定的光源。 我们可以使用 UnityGetRawBakedOcclusions 函数，它的工作方式与 UnitySampleBakedOcclusion 类似，区别在于前者不只使用一个通道。
+
+```c
+	FragmentOutput output;
+	#if defined(DEFERRED_PASS)
+		#if !defined(UNITY_HDR_ON)
+			color.rgb = exp2(-color.rgb);
+		#endif
+		output.gBuffer0.rgb = albedo;
+		output.gBuffer0.a = GetOcclusion(i);
+		output.gBuffer1.rgb = specularTint;
+		output.gBuffer1.a = GetSmoothness(i);
+		output.gBuffer2 = float4(i.normal * 0.5 + 0.5, 1);
+		output.gBuffer3 = color;
+
+		#if defined(SHADOWS_SHADOWMASK) && (UNITY_ALLOWED_MRT_COUNT > 4)
+			output.gBuffer4 =
+				UnityGetRawBakedOcclusions(i.lightmapUV, i.worldPos.xyz);
+		#endif
+	#else
+		output.color = ApplyFog(color, i);
+	#endif
+```
+
+要在没有光照贴图的情况下进行编译，请在光照贴图不可用时将光照贴图坐标设为 0。  
+
+## 2.3 使用阴影遮罩 G 缓存
+
+要使我们的着色器和默认的延迟渲染着色器配合使用，这样就够了，但要使其与我们的自定义着色器一起使用，我们必须调整 MyDeferredShading 。第一步是为额外的 G 缓存添加变量。
+
+```c
+sampler2D _CameraGBufferTexture0;
+sampler2D _CameraGBufferTexture1;
+sampler2D _CameraGBufferTexture2;
+sampler2D _CameraGBufferTexture4;
+```
+
+接下来，创建一个函数来获取阴影衰减。如果我们有一个阴影遮罩，可以对纹理进行采样，并和 unity_OcclusionMaskSelector 求点积再做 saturate 来完成。该向量定义在 UnityShaderVariables 中，用于指示当前正在渲染的灯光的通道。
+
+```c
+float GetShadowMaskAttenuation (float2 uv) {
+	float attenuation = 1;
+	#if defined (SHADOWS_SHADOWMASK)
+		float4 mask = tex2D(_CameraGBufferTexture4, uv);
+		attenuation = saturate(dot(mask, unity_OcclusionMaskSelector));
+	#endif
+	return attenuation;
+}
+```
+
+在 CreateLight 中，我们还得在阴影遮罩的情况下淡化阴影，即使当前光源没有实时阴影。
+
+```c
+UnityLight CreateLight (float2 uv, float3 worldPos, float viewZ) {
+	…
+
+	#if defined(SHADOWS_SHADOWMASK)
+		shadowed = true;
+	#endif
+
+	if (shadowed) {
+		…
+	}
+
+	…
+}
+```
+
+要正确包含烘焙阴影，请再次使用 UnityMixRealtimeAndBakedShadows 而不是旧的淡入淡出计算。
+
+```c
+	if (shadowed) {
+		float shadowFadeDistance =
+			UnityComputeShadowFadeDistance(worldPos, viewZ);
+		float shadowFade = UnityComputeShadowFade(shadowFadeDistance);
+//		shadowAttenuation = saturate(shadowAttenuation + shadowFade);
+		shadowAttenuation = UnityMixRealtimeAndBakedShadows(
+			shadowAttenuation, GetShadowMaskAttenuation(uv), shadowFade
+		);
+
+		…
+	}
+```
+
+我们现在使用自定义的延迟着色器也获得了正确的烘焙阴影。只有一点：当我们的优化分支被执行的时候，会跳过阴影混合，所以使用阴影遮罩时无法使用这个捷径。
+
+```c
+	if (shadowed) {
+		…
+
+		#if defined(UNITY_FAST_COHERENT_DYNAMIC_BRANCHING) && defined(SHADOWS_SOFT)
+			#if !defined(SHADOWS_SHADOWMASK)
+				UNITY_BRANCH
+				if (shadowFade > 0.99) {
+					shadowAttenuation = 1;
+				}
+			#endif
+		#endif
+	}
+```
+
+## 2.4 距离阴影遮罩模式
+
+虽然阴影遮罩模式为静态对象提供了良好的烘焙阴影，但动态对象无法从中受益，动态对象只能接收实时阴影和光照探针数据。 如果我们想在动态对象上获得良好的阴影，那么静态对象也必须投射实时阴影，这就是 Distance Shadowmask 混合光照模式的用途。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/distance-shadowmask-mode.png)  
+*Distance Shadowmask 模式*  
+
+> **我没有 Distance Shadowmask 选项？**
+> 在 Unity 2017 里，使用哪种阴影遮罩模式是通过质量设置面板控制的。
+
+使用距离阴影遮罩模式时，所有内容都使用实时阴影，乍一看，它似乎与 Baked Indirect 模式完全相同。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/realtime-shadows.png)  
+*所有物体都是实时阴影*
+
+实际上仍然有一个阴影遮罩，在此模式下，超出阴影距离的地方使用烘焙阴影和光照探针。所以这是最昂贵的模式，等于在阴影距离以内使用烘焙间接光，超出该范围使用阴影遮罩。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/realtime-shadowmask-blending.png)  
+*近处实时光，远处使用阴影遮罩和探针*  
+
+我们已经支持这种模式，因为我们使用的是 UnityMixRealtimeAndBakedShadows。为了在完全实时和烘焙阴影之间正确混合，函数会像往常一样衰减实时阴影，然后采用实时阴影和烘焙阴影两者的较小值。
+
+## 2.5 多光源
+
+由于阴影遮罩有四个通道，因此一次最多可支持四个重叠的光体。例如，这是一个使用光照贴图另带三个聚光灯的场景截图，我降低了主光源的强度，使聚光灯更明显。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/four-lights.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/four-lights-maps.png)  
+*四盏灯的混合*   
+
+## 2.6 支持多个带遮罩的方向光
+
+不幸的是，事实证明，阴影遮罩只支持一个混合模式的方向灯。当有多个方向灯时，阴影衰减会出错。至少在使用前向渲染路径时如此，而延迟渲染正常工作。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/two-directional-incorrect.png)  
+*两盏灯时错误的衰减*  
+
+Unity的标准着色器也有这个问题，至少在 5.6.2 和 2017.1.0f1 版本还是如此。但是，这并不是由于光照贴图引擎的固有限制，这是使用 UNITY_LIGHT_ATTENUATION 的新方法的时的疏忽。Unity 通过 UNITY_SHADOW_COORDS 定义了阴影插值器，既用它来存储方向阴影的屏幕空间坐标，也用来存储具有阴影遮罩的其他光源的光照贴图坐标。
+
+使用阴影遮罩的方向灯也需要光照贴图坐标。在 forward base pass 里，插值器会包含这些坐标，因为 LIGHTMAP_ON 会在需要时定义。但是，LIGHTMAP_ON 永远不会在 additive pass 中定义，这意味着附加的方向灯不具有可用的光照贴图坐标。 事实证明，在这种情况下 UNITY_LIGHT_ATTENUATION 只简单地返回 0，导致光照贴图采样错误。
+
+所以我们不能在使用阴影遮罩的附加方向灯上依赖 UNITY_LIGHT_ATTENUATION。我们很容易识别出这种情况，这里假设我们正在使用屏幕空间方向阴影，实际在某些平台上并非如此。
+
+```c
+#if defined(FOG_LINEAR) || defined(FOG_EXP) || defined(FOG_EXP2)
+	…
+#endif
+
+
+#if !defined(LIGHTMAP_ON) && defined(SHADOWS_SCREEN)
+	#if defined(SHADOWS_SHADOWMASK) && !defined(UNITY_NO_SCREENSPACE_SHADOWS)
+		#define ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS 1
+	#endif
+#endif
+```
+
+接下来，当我们有额外的带遮罩方向阴影时，我们还必须包括光照贴图坐标。
+
+```c
+struct Interpolators {
+	…
+
+	#if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+		float2 lightmapUV : TEXCOORD6;
+	#endif
+};
+
+…
+
+Interpolators MyVertexProgram (VertexData v) {
+	…
+
+	#if defined(LIGHTMAP_ON) || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+		i.lightmapUV = v.uv1 * unity_LightmapST.xy + unity_LightmapST.zw;
+	#endif
+
+	…
+}
+```
+
+有了光照贴图坐标，我们可以再次使用 FadeShadows 函数来计算衰减。
+
+```c
+float FadeShadows (Interpolators i, float attenuation) {
+	#if HANDLE_SHADOWS_BLENDING_IN_GI || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+		…
+	#endif
+
+	return attenuation;
+}
+```
+
+但这还是不对，因为我们正在给它提供有问题的衰减数据。我们必须绕过 UNITY_LIGHT_ATTENUATION 并且仅仅获取烘焙的衰减，在这种情况下我们可以通过 SHADOW_ATTENUATION 宏来完成。
+
+```c
+float FadeShadows (Interpolators i, float attenuation) {
+	#if HANDLE_SHADOWS_BLENDING_IN_GI || ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+		// UNITY_LIGHT_ATTENUATION doesn't fade shadows for us.
+		#if ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS
+			attenuation = SHADOW_ATTENUATION(i);
+		#endif
+		…
+	#endif
+
+	return attenuation;
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/two-directional-correct.png)  
+*两个方向光下正确的衰减*  
+
+> **依赖UNITY_LIGHT_ATTENUATION是一个好主意吗？**
+> 这段宏代码已经进入稳定版很长时间，它一直是自定义着色器引用 Unity 的照明设置的最佳方式。到了 Unity 5.6.0 中发生了变化，一个新方法被强制塞进旧的宏结构。
+> Unity在 2017.3 中再次改变了附加光源的计算方法，因此支持额外的方向光，但这会给我们的解决方案和未来的光照计算带来麻烦，最快的解决方案是禁用我们的解决方案。
+
+```c
+// #define ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS 1
+```
+
+> 不幸的是，Unity的最新方法是一种打补丁，它新引入了对 clip 空间位置的 w 坐标的依赖——基本是唯一需要依赖的地方。 这对于所有 LOD 交叉淡入的组合都不起作用，因此不过是一个 bug 代替了另一个bug。当我讲到新的脚本化渲染流水线时，我可能不会依赖 UNITY_LIGHT_ATTENUATION。
+
+# 3 负阴影
