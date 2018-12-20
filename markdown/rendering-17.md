@@ -4,7 +4,7 @@
  * 只烘焙间接光
  * 烘焙阴影和实时阴影的混合
  * 处理代码修改和错误
- * 处理负光照
+ * 处理减法光照
  
 这一篇是渲染教程的第十七部分，上一部分里我们通过光照贴图增加了对静态光照的支持，这次，我们将朝着烘焙和实时光照结合的方向前进。
 
@@ -59,6 +59,7 @@
 
 一开始一切似乎都很好。 然而事实证明，阴影衰减不再适用于方向光。只要大幅减少阴影距离，就容易看到阴影被切断了。
 
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/shadows-standard.png)  
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/baking-indirect-light/shadows-custom.png)  
 *阴影衰减，标准着色器 vs. 我们的着色器*  
 
@@ -107,7 +108,7 @@ Interpolators MyVertexProgram (VertexData v) {
 	…
 }
 ```
-> **UNITY_INITIALIZE_OUTPUT 都做了什么？**
+> **UNITY_INITIALIZE_OUTPUT 都做了什么？**  
 > 当支持它时，它只是将 0 赋值给变量，并转换为正确的类型。它不受支持时候什么都不做。
 ```c
 // Initialize arbitrary structure with zero values.
@@ -520,14 +521,188 @@ float FadeShadows (Interpolators i, float attenuation) {
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-17/using-a-shadowmask/two-directional-correct.png)  
 *两个方向光下正确的衰减*  
 
-> **依赖UNITY_LIGHT_ATTENUATION是一个好主意吗？**
-> 这段宏代码已经进入稳定版很长时间，它一直是自定义着色器引用 Unity 的照明设置的最佳方式。到了 Unity 5.6.0 中发生了变化，一个新方法被强制塞进旧的宏结构。
+> **依赖 UNITY_LIGHT_ATTENUATION 是一个好主意吗？**
+> 这个宏的代码很久以来一直是稳定的，它一直是自定义着色器引用 Unity 的照明设置的最佳方式。直到 Unity 5.6.0 开始发生了变化，一套新方法被强制塞进旧的宏结构。
 > Unity在 2017.3 中再次改变了附加光源的计算方法，因此支持额外的方向光，但这会给我们的解决方案和未来的光照计算带来麻烦，最快的解决方案是禁用我们的解决方案。
 
 ```c
 // #define ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS 1
 ```
 
-> 不幸的是，Unity的最新方法是一种打补丁，它新引入了对 clip 空间位置的 w 坐标的依赖——基本是唯一需要依赖的地方。 这对于所有 LOD 交叉淡入的组合都不起作用，因此不过是一个 bug 代替了另一个bug。当我讲到新的脚本化渲染流水线时，我可能不会依赖 UNITY_LIGHT_ATTENUATION。
+> 不幸的是，Unity的最新方法是一种打补丁，它新引入了对 clip 空间的 w 坐标的依赖——基本是唯一需要依赖的地方。 它对所有 LOD 交叉淡入的组合都不起作用，因此不过是一个 bug 代替了另一个bug。当我讲到新的脚本化渲染流水线时，我可能不会依赖 UNITY_LIGHT_ATTENUATION。
 
-# 3 负阴影
+# 3 减法阴影
+
+混合照明很不错，但它并不像纯烘焙那么便宜。如果您的目标是低性能硬件，那么混合照明就不可行了。烘焙可以工作，但您可能真的需要动态对象来在静态对象上投射阴影。 在这种情况下，您可以使用减法混合照明模式。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/subtractive-mode.png)  
+*减法模式*  
+
+切换到减法模式后，场景将变得更加明亮。这是因为静态对象现在同时使用完全烘焙的光照贴图和直接光照。与往常一样，动态物体仍然使用光照探针和直接光照。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/too-bright.png)  
+*静态物体计算了两倍的光照*  
+
+减法模式仅适用于前向渲染。使用延迟渲染时，相关对象将退化回前向渲染，就像透明对象一样。
+
+## 3.1 减法光照
+
+减法模式的思路是通过光照贴图照亮静态对象，同时将动态阴影也包括进去。这是通过降低阴影区域中光照贴图的强度来完成的。为此，着色器需要同时访问光照贴图和实时阴影，它还需要使用实时光来确定光照贴图必须调暗多少，这就是我们在切换到这种模式后获得双倍照明的原因。
+
+减法光是一种近似，仅适用于单个方向光，因此仅支持主方向光的阴影。此外，我们必须以某种方式知道动态阴影区域中的间接光信息，由于我们使用的是完全烘焙的光照贴图，因此我们没有此信息。 Unity 使用了均匀的颜色来模拟环境光，而非另外采用一张间接光的光照贴图——这就是 *Realtime Shadow Color* 选项的含义，你可以在 Mixed Lighting 选项组里找到它。
+
+在着色器中，如我们所知道，应该在定义了 LIGHTMAP_ON，SHADOWS_SCREEN 和 LIGHTMAP_SHADOW_MIXING ，而没有定义 SHADOWS_SHADOWMASK 关键字时计算减法光照。在这种情况下，让我们定义 SUBTRACTIVE_LIGHTING，以更容易使用。
+
+```c
+#if !defined(LIGHTMAP_ON) && defined(SHADOWS_SCREEN)
+	#if defined(SHADOWS_SHADOWMASK) && !defined(UNITY_NO_SCREENSPACE_SHADOWS)
+		#define ADDITIONAL_MASKED_DIRECTIONAL_SHADOWS 1
+	#endif
+#endif
+
+#if defined(LIGHTMAP_ON) && defined(SHADOWS_SCREEN)
+	#if defined(LIGHTMAP_SHADOW_MIXING) && !defined(SHADOWS_SHADOWMASK)
+		#define SUBTRACTIVE_LIGHTING 1
+	#endif
+#endif
+```
+
+在我们开始其他事情之前，必须先去掉双倍照明，这可以通过关闭动态光来完成，如在延迟渲染时候一样。
+
+```c
+UnityLight CreateLight (Interpolators i) {
+	UnityLight light;
+
+	#if defined(DEFERRED_PASS)  || SUBTRACTIVE_LIGHTING
+		light.dir = float3(0, 1, 0);
+		light.color = 0;
+	#else
+		…
+	#endif
+
+	return light;
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/baked-static.png)  
+*静态物体只有烘焙光*
+
+## 3.2  烘焙光的阴影
+
+要应用减法阴影，让我们创建一个函数来调整间接光，通常来说它什么都不做。
+
+```c
+void ApplySubtractiveLighting (
+	Interpolators i, inout UnityIndirect indirectLight
+) {}
+```
+
+这个函数应该在我们获取了光照贴图数据之后调用：
+
+```c
+UnityIndirect CreateIndirectLight (Interpolators i, float3 viewDir) {
+	…
+
+	#if defined(FORWARD_BASE_PASS) || defined(DEFERRED_PASS)
+		#if defined(LIGHTMAP_ON)
+			indirectLight.diffuse =
+				DecodeLightmap(UNITY_SAMPLE_TEX2D(unity_Lightmap, i.lightmapUV));
+			
+			#if defined(DIRLIGHTMAP_COMBINED)
+				…
+			#endif
+
+			ApplySubtractiveLighting(i, indirectLight);
+		#else
+			indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+		#endif
+		…
+	#endif
+
+	return indirectLight;
+}
+```
+
+如果有减色光照，那么我们必须获取阴影衰减，我们可以简单地从 CreateLight 复制一点代码。
+
+```c
+void ApplySubtractiveLighting (
+	Interpolators i, inout UnityIndirect indirectLight
+) {
+	#if SUBTRACTIVE_LIGHTING
+		UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos.xyz);
+		attenuation = FadeShadows(i, attenuation);
+	#endif
+}
+```
+
+接下来，如果我们使用实时照明，必须弄清楚应该接收多少光。我们假设此信息与光照贴图中的信息相匹配。 由于光照贴图仅包含漫反射，因此我们可以计算定向光的兰伯特项。
+
+```c
+	#if SUBTRACTIVE_LIGHTING
+		UNITY_LIGHT_ATTENUATION(attenuation, i, i.worldPos.xyz);
+		attenuation = FadeShadows(i, attenuation);
+
+		float ndotl = saturate(dot(i.normal, _WorldSpaceLightPos0.xyz));
+	#endif
+```
+
+为了得到阴影光强度，我们必须计算 Lambert 项与衰减相乘。 但是我们已知的是完全没有遮蔽的烘焙光。因此，我们估算一下阴影会阻挡多少光线。
+
+```c
+		float ndotl = saturate(dot(i.normal, _WorldSpaceLightPos0.xyz));
+		float3 shadowedLightEstimate =
+			ndotl * (1 - attenuation) * _LightColor0.rgb;
+```
+
+通过从烘焙的光中减去该估计值，我们最终得到调整后的光。
+
+```c
+		float3 shadowedLightEstimate =
+			ndotl * (1 - attenuation) * _LightColor0.rgb;
+		float3 subtractedLight = indirectLight.diffuse - shadowedLightEstimate
+		indirectLight.diffuse = subtractedLight;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/subtracted-light.png)  
+*减法光*
+
+无论环境光如何，这种算法都会产生纯黑色阴影。为了更好地匹配场景，我们可以使用减色阴影颜色，通过 unity_ShadowColor 获得。 阴影区域不应该比这种颜色更暗，但它们可能更亮,因此取最大计算光和阴影颜色。
+
+```c
+		float3 subtractedLight = indirectLight.diffuse - shadowedLightEstimate;
+		subtractedLight = max(subtractedLight, unity_ShadowColor.rgb);
+		indirectLight.diffuse = subtractedLight;
+```
+
+我们还必须考虑阴影强度低于1的可能性。要应用阴影强度，请根据 _LightShadowData 的X分量在阴影和非阴影光之间进行插值。  
+
+```c
+		subtractedLight = max(subtractedLight, unity_ShadowColor.rgb);
+		subtractedLight =
+			lerp(subtractedLight, indirectLight.diffuse, _LightShadowData.x);
+		indirectLight.diffuse = subtractedLight;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/colored-shadows.png)  
+*带颜色的阴影*
+
+因为我们的场景的环境光强度为零，所以默认阴影颜色与场景不匹配。但这样可以很容易地看出减法阴影，所以我没有调整它。 另外，带颜色的阴影区域现在明显覆盖了所有烘焙阴影，这不是我们想要的，它应该只影响接收动态阴影的区域，而不能使烘焙阴影变亮。要正确执行此操作，请取减法光照和烘焙光照的最小值。
+
+```c
+//		indirectLight.diffuse = subtractedLight;
+		indirectLight.diffuse = min(subtractedLight, indirectLight.diffuse);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/subtractive-shadows.png)  
+*正确的减法阴影*
+
+我们现在只要使用适当的阴影颜色，就可以获得正确的减法阴影。但请记住，它只是一个近似值，并且不适用于多个灯光。例如，其他烘焙光源的阴影是错误的。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-17/subtractive-shadows/incorrect-subtraction.png)  
+*其他光源的错误减法阴影*
+
+下一课是**实时全局光、探针体和LOD组**
+
+---
+[原教程传送门]（https://catlikecoding.com/unity/tutorials/rendering/part-17/）
