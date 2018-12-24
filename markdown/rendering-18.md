@@ -321,3 +321,146 @@ public class EmissiveOscillator : MonoBehaviour {
 
 # 2 光照探针代理体
 
+烘焙和实时光照影响动态物体都要通过光照探针。根据物体的位置对探针数据插值，然后用于GI计算。这种方法适用于小物体，但对于较大的物体来说太粗糙了。
+
+例如，将一个拉长的立方体添加到测试场景中，使其受到不同光照的影响。它应该使用我们的白色材质。由于它是一个动态的立方体，最终会使用单个点来确定其GI贡献。移动移动它的位置，使这个点被遮蔽，此时整个立方体都会变暗，显然这是错误的。为了使错误明显，我使用了烘焙主光源，所以所有照明都来自烘焙和实时GI数据。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/large-object.png)  
+*较大的动态物体，错误的光照*
+
+为了使光照探针适用于这种情况，我们可以使用光照探针代理体(Light Probe Proxy Volume，LPPV)。它会为着色器提供插值的探针网格而非单个点的数据。它需要线性过滤的浮点3D纹理支持——只有较新的显卡才有的功能。除此之外，还要在图像等级设置中启用LPPV支持。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/support-lppv.png)  
+*开启LPPV*  
+
+## 2.1 为物体增加一个LPPV
+
+LPPV 可以以各种方式设置，最直接的是作为使用它物体的组件添加。您可以通过 *Component/Rendering/Light Probe Proxy Volume* 添加。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/lppv-inspector.png)  
+*LPPV 组件*  
+
+运行时，LPPV 会在光照探针之间插值，就像是一般动态物体的网格一样。内插值被缓存起来，Refresh Mode 控制缓存何时更新。 默认值为 Automatic ，意味着在动态GI更改和探针组移动时会发生更新。Bounding Box Mode 控制代理体的定位方式。 Automatic Local  意味着它填充到它所附加的物体的边界框。这些默认设置很适用于我们的立方体，因此我们保留它们。
+
+要让我们的立方体实际使用 LPPV，我们必须将其 MeshRenderer 的 Light Probes 模式设置为 Use Proxy Volume。其默认行为是使用对象本身的 LPPV 组件，但您也可以强制它使用另一个代理体。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/mesh-renderer-settings.png)  
+*使用代理体而非普通的探针*  
+
+自动分辨率模式不适用于我们的拉长立方体。因此，将 Resolution Mode 设置为 Custom，并确保在立方体的角处有采样点，沿着长边要布置多个采样点。选择物体后可以看到这些采样点。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/custom-resolution.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/lppv-gizmos.png)  
+*自定义探针分辨率以适合拉长的立方体*  
+
+## 2.2 采样代理体
+
+立方体变黑了，因为我们的着色器尚不支持采样 LPPV。为了使它正确工作，我们必须调整 CreateIndirectLight 内的球谐函数部分代码。UNITY_LIGHT_PROBE_PROXY_VOLUME 定义为1时，标识着启用了 LPPV。在这种情况下我们先什么也不做，看看会发生什么。
+
+```c
+		#if !defined(LIGHTMAP_ON) && !defined(DYNAMICLIGHTMAP_ON)
+			#if UNITY_LIGHT_PROBE_PROXY_VOLUME
+			#else
+				indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+			#endif
+		#endif
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/no-more-sh.png)  
+*没有球谐函数了*  
+
+事实证明，所有球谐函数都被禁用了，对于没有使用 LPPV 的动态物体也是如此。这是因为 UNITY_LIGHT_PROBE_PROXY_VOLUME 是在项目范围内定义的，而不是针对每个物体定义的。单个对象是否使用 LPPV 由 UnityShaderVariables 中定义的 unity_ProbeVolumeParams 的 x分量指示。如果它是 1，那么物体有 LPPV，否则我们应该使用常规球谐函数。
+
+```c
+			#if UNITY_LIGHT_PROBE_PROXY_VOLUME
+				if (unity_ProbeVolumeParams.x == 1) {
+				}
+				else {
+					indirectLight.diffuse +=
+						max(0, ShadeSH9(float4(i.normal, 1)));
+				}
+			#else
+				indirectLight.diffuse += max(0, ShadeSH9(float4(i.normal, 1)));
+			#endif
+```
+
+要对代理体采样，我们应该使用 SHEvalLinearL0L1_SampleProbeVolume 函数代替 ShadeSH9。此函数在 UnityCG 中定义，需要世界坐标作为额外参数。
+
+```c
+				if (unity_ProbeVolumeParams.x == 1) {
+					indirectLight.diffuse = SHEvalLinearL0L1_SampleProbeVolume(
+						float4(i.normal, 1), i.worldPos
+					);
+					indirectLight.diffuse = max(0, indirectLight.diffuse);
+				}
+```
+
+> **SHEvalLinearL0L1_SampleProbeVolume 是如何工作的**
+> 顾名思义，此函数仅包括前两个球谐频段——L0 和 L1。Unity 不会将第三个频段用于 LPPV。因此，我们得到了质量较低的光照近似值，但我们在多个世界空间采样之间进行插值，而不是使用单个点。这是代码：
+```c
+half3 SHEvalLinearL0L1_SampleProbeVolume (half4 normal, float3 worldPos) {
+	const float transformToLocal = unity_ProbeVolumeParams.y;
+	const float texelSizeX = unity_ProbeVolumeParams.z;
+
+	//The SH coefficients textures and probe occlusion
+	// are packed into 1 atlas.
+	//-------------------------
+	//| ShR | ShG | ShB | Occ |
+	//-------------------------
+
+	float3 position = (transformToLocal == 1.0f) ?
+		mul(unity_ProbeVolumeWorldToObject, float4(worldPos, 1.0)).xyz :
+		worldPos;
+	float3 texCoord = (position - unity_ProbeVolumeMin.xyz) *
+		unity_ProbeVolumeSizeInv.xyz;
+	texCoord.x = texCoord.x * 0.25f;
+
+	// We need to compute proper X coordinate to sample. Clamp the
+	// coordinate otherwize we'll have leaking between RGB coefficients
+	float texCoordX =
+		clamp(texCoord.x, 0.5f * texelSizeX, 0.25f - 0.5f * texelSizeX);
+
+	// sampler state comes from SHr (all SH textures share the same sampler)
+	texCoord.x = texCoordX;
+	half4 SHAr = UNITY_SAMPLE_TEX3D_SAMPLER(
+		unity_ProbeVolumeSH, unity_ProbeVolumeSH, texCoord
+	);
+	texCoord.x = texCoordX + 0.25f;
+	half4 SHAg = UNITY_SAMPLE_TEX3D_SAMPLER(
+		unity_ProbeVolumeSH, unity_ProbeVolumeSH, texCoord
+	);
+	texCoord.x = texCoordX + 0.5f;
+	half4 SHAb = UNITY_SAMPLE_TEX3D_SAMPLER(
+		unity_ProbeVolumeSH, unity_ProbeVolumeSH, texCoord
+	);
+	// Linear + constant polynomial terms
+	half3 x1;
+	x1.r = dot(SHAr, normal);
+	x1.g = dot(SHAg, normal);
+	x1.b = dot(SHAb, normal);
+
+	return x1;
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/lppv-too-dark.png)  
+*LPPV 采样，在伽马空间过于暗*  
+
+我们的着色器现在根据需要对 LPPV 进行采样，但结果太暗。至少，在伽马色彩空间中工作时就是这种情况。这是因为球谐函数数据存储在线性空间中。因此可能需要进行色彩空间转换。
+
+```c
+				if (unity_ProbeVolumeParams.x == 1) {
+					indirectLight.diffuse = SHEvalLinearL0L1_SampleProbeVolume(
+						float4(i.normal, 1), i.worldPos
+					);
+					indirectLight.diffuse = max(0, indirectLight.diffuse);
+					#if defined(UNITY_COLORSPACE_GAMMA)
+			            indirectLight.diffuse =
+			            	LinearToGammaSpace(indirectLight.diffuse);
+			        #endif
+				}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/lppv-correct.png)  
+*LPPV 采样，颜色正确*  
+
