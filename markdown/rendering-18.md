@@ -464,3 +464,183 @@ half3 SHEvalLinearL0L1_SampleProbeVolume (half4 normal, float3 worldPos) {
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-18/light-probe-proxy-volumes/lppv-correct.png)  
 *LPPV 采样，颜色正确*  
 
+
+# 3 LOD 组
+
+当一个物体最终只覆盖应用程序窗口的一小部分时，您渲染它不需要过于细致的模型。您可以根据对象的视图大小使用不同的模型。这被称为细节级别(level of detail，LOD)。Unity 允许我们通过 LOD Group 组件执行此操作。
+
+## 3.1 创建 LOD 层级
+
+问题的核心是在不同的细节级别使用同一模型的多个版本。最高级别——LOD 0——具有最多的顶点、子对象、动画、复杂材质等。后面的级别会变得越来越简单，渲染也越来越便宜。理想情况下，Unity 切换相邻 LOD 级别时，用户应当无法轻易看出差别，否则突然的改变是很明显的。但在研究这种技术时，我们会使用明显不同的模型。
+
+创建一个空的 GameObject 并给它添加两个子物体。第一个是标准球体，第二个是标准立方体，各轴缩放均设置为 0.75。正如预期，结果看起来像是球体和立方体重叠。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-object-scene.png)![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-object-hierarchy.png)  
+*把球和立方体作为一个物体*
+
+通过 Component/Rendering/LOD Group 将 LOD Group 组件添加到父物体。您会获得一个具有默认设置的 LOD 组，具有三个 LOD 级别。这里的百分比是指物体边界框所覆盖的部分的高度占窗口总高度的比。因此，默认情况下，当垂直高度下降到窗口高度的 60％ 时切换到 LOD 1，当减小到30％时，切换到 LOD 2。 当低于 10％ 时，根本不会被渲染。您可以通过拖动 LOD 框的边缘来更改这些阈值。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-component.png)  
+*LOD Group 组件*  
+
+实际的阈值可能被 LOD Bias 修改，如组件的 Inspector 上提到的。LOD Bias 是项目 Quality 设置的一个参数，默认值为 2，这意味着阈值实际上减半。最大 LOD 级别也可以设置，从而跳过最高的若干级别。
+
+要使其工作，您必须告诉组件每个 LOD 级别使用哪些物体，方法是选择 LOD 块并将物体添加到其 Renderers 列表。虽然您可以添加场景中的任何对象，但一般只添加其子对象。将球体用于 LOD 0，将立方体用于 LOD 1。我们将 LOD 2 留空，因此实际上只有两个 LOD 级别。如果需要，可以通过右键上下文菜单删除和插入 LOD 级别。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-0-inspector.png)  
+*把球体添加到 LOD 0*  
+
+配置LOD级别后，您可以通过移动相机来查看它们的运行情况。如果物体足够大，会显示为球体，否则会显示为立方体或根本不会显示。
+
+
+[运行时的 LOD 切换](https://thumbs.gfycat.com/ShyAffectionateFairyfly-mobile.mp4)  
+
+## 3.2 烘焙全局光照和 LOD 组
+
+因为LOD组的渲染方式取决于其视图大小，所以它们自然是动态的。但是，您仍然可以将它们设置为静态。把整个物体层次结构设为静态，包括根物体和两个子对象，然后将主光源设置为烘焙，看看会发生什么。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/baked-lighting.png)  
+*使用烘焙光*
+
+看起来烘焙静态光照贴图时总是使用 LOD 0。我们最终总是看到球体对阴影和间接光的贡献，即使 LOD 组切换到立方体或剔除级别。但请注意，立方体既然使用静态光照贴图，就不使用光照探针了，对吧？关掉探针组试试。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/baked-lighting-without-probes.png)  
+*不带探针的烘焙光*  
+
+禁用探针组会使立方体变暗。这意味着他们不再接收间接光。这是因为在烘焙过程中确定间接光时使用 LOD 0。要找到其他 LOD 层级的间接光，Unity 最好的办法就是依靠烘焙的光照探针。因此，即使我们在运行时不需要光照探针，我们也需要它，以为我们的立方体提供间接光。
+
+## 3.3 实时全局光照和 LOD 组
+
+当只使用实时全局光照时，方法类似，只有一点：现在我们的立方体在运行时使用光照探针。您可以选择球体或立方体来验证一下。选择立方体后，您可以看到辅助线，显示使用哪种光照探针。球体不显示，因为它们使用动态光照贴图。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/realtime-gi-lod-1-probes.png)  
+*LOD 1 在实时全局光照下使用探针*  
+
+当烘焙和实时全局光照同时使用时，情况会变得更加复杂。在这种情况下，立方体应该使用光照贴图获取烘焙全局光照，使用探针以获得实时全局光照。不幸的是，这是不可能的，因为光照贴图和球谐函数不能同时使用，只能选一个。由于光照贴图数据也可用于立方体，因此Unity最终选择了它。因此，立方体不受实时全局光照的影响。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-1-only-baked.png)  
+*LOD 1 只有烘焙光照，这里使用了较暗的主光源*  
+
+一个重要的细节是 LOD 层级的烘焙和渲染是完全独立的，不需要使用完全相同的设置。如果最终实时光照比烘焙光照更重要，您可以强制立方体使用光照探针，把立方体标记为光照贴图非静态，同时保持球体还是静态。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/lod-1-forced-probes.png)  
+*LOD 1 强制使用光照探针*
+
+## 3.4 LOD 层级之间的交叉淡入淡出
+
+LOD 组的缺点是，当 LOD 级别发生变化时，视觉上的突变非常明显，物体突然出现、消失或改变形状。这种突变可以通过相邻 LOD 级别之间的交叉淡化来减轻，方法是将组的淡入淡出模式设置为交叉渐变。另外还有一种淡入淡出模式，Unity 将其用于 SpeedTree 对象，我们不会使用。
+
+启用交叉渐变时，每个 LOD 级别会显示 Fade Transition Width 字段，该字段控制其块有多大比例用于淡入淡出。例如，当设置为 0.5 时，LOD 的一半范围都用于淡入下一层级。或者可以对淡入进行动画处理，在这种情况下，LOD 层级切换需要大约半秒钟。
+
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/cross-fade-inspector.png)  
+*0.5 宽度的交叉淡入*
+
+如果启用交叉渐变，在组切换时，会同时渲染两个 LOD 层级的内容。
+
+## 3.5 支持交叉渐变
+
+Unity 的标准着色器默认情况下不支持交叉淡入淡出。您必须复制标准着色器并为 LOD_FADE_CROSSFADE 关键字添加 multi-compile 指令。我们还需要在 My First Lighting 着色器添加该指令以支持交叉淡入淡出。将指令添加到除 meta pass 之外的所有 pass。。。
+
+```c
+#pragma multi_compile _ LOD_FADE_CROSSFADE
+```
+
+我们在 LOD 级别之间转换时会使用抖动。该方法适用于前向渲染和延迟渲染，也适用于阴影。
+
+在创建半透明阴影时，我们已经使用过抖动。它需要片段的屏幕空间坐标，这迫使我们为顶点和片段程序使用不同的插值器结构。 因此，让我们复制 My Lighting 中的 Interpolators 结构，将其重命名为 InterpolatorsVertex。
+
+```c
+struct InterpolatorsVertex {
+	…
+};
+
+struct Interpolators {
+	…
+};
+
+…
+
+InterpolatorsVertex MyVertexProgram (VertexData v) {
+	InterpolatorsVertex i;
+	…
+}
+```
+
+当我们必须交叉淡入淡出时，片段程序的插值器必须包含 vpos，否则我们可以保持通常的位置。
+
+```c
+struct Interpolators {
+	#if defined(LOD_FADE_CROSSFADE)
+		UNITY_VPOS_TYPE vpos : VPOS;
+	#else
+		float4 pos : SV_POSITION;
+	#endif
+
+	…
+};
+```
+
+我们可以在片段程序开始时使用 UnityApplyDitherCrossFade 函数来执行交叉渐变。
+
+```c
+FragmentOutput MyFragmentProgram (Interpolators i) {
+	#if defined(LOD_FADE_CROSSFADE)
+		UnityApplyDitherCrossFade(i.vpos);
+	#endif
+
+	…
+}
+```
+
+> **UnityApplyDitherCrossFade 是如何工作的？**
+> 这个函数定义在 UnityCG 中。它类似于我们在第十二节半透明阴影中所使用的抖动，除了抖动级别对于整个物体是均匀的。因此，不需要在抖动级别之间进行混合。它使用16个抖动级别，存储在 4×64 的 2D 纹理中，而不是 4×4×16 的 3D 纹理。
+```c
+sampler2D _DitherMaskLOD2D;
+
+void UnityApplyDitherCrossFade(float2 vpos) {
+	vpos /= 4; // the dither mask texture is 4x4
+	// quantized lod fade by 16 levels
+	vpos.y = frac(vpos.y) * 0.0625 /* 1/16 */ + unity_LODFade.y;
+	clip(tex2D(_DitherMaskLOD2D, vpos).a - 0.5);
+}
+```
+> unity_LODFade 变量定义在 UnityShaderVariables 中。其 Y 分量包含对象的淡入淡出量，分十六个级别。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/dithering-geometry.png)  
+*通过抖动淡入淡出物体*
+
+交叉渐变现在可以用于几何体了。为了使它适用于阴影，我们必须调整 My Shadows。首先，当我们交叉淡入时，必须使用 vpos。其次，我们还必须在片段程序的开头使用 UnityApplyDitherCrossFade。
+
+```c
+struct Interpolators {
+	#if SHADOWS_SEMITRANSPARENT || defined(LOD_FADE_CROSSFADE)
+		UNITY_VPOS_TYPE vpos : VPOS;
+	#else
+		float4 positions : SV_POSITION;
+	#endif
+
+	…
+};
+
+…
+
+float4 MyShadowFragmentProgram (Interpolators i) : SV_TARGET {
+	#if defined(LOD_FADE_CROSSFADE)
+		UnityApplyDitherCrossFade(i.vpos);
+	#endif
+
+	…
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-18/lod-groups/dithering-shadows.png)  
+[视频](https://thumbs.gfycat.com/AcceptableClosedAmurstarfish-mobile.mp4) 
+*同时对物体和阴影进行交叉淡入*
+
+因为立方体和球体相互交叉，所以我们在它们之间交叉渐变时，得到一些奇怪的自阴影。我们这样可以很方便地看到阴影之间的交叉渐变有效，但在为实际游戏创建 LOD 物体时，必须注意这些瑕疵。
+
+下一节是 GPU Instancing
+
+---
+[原教程传送门]（https://catlikecoding.com/unity/tutorials/rendering/part-18/）
