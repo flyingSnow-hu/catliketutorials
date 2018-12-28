@@ -220,3 +220,145 @@ float2 FlowUV (float2 uv, float2 flowVector, float time) {
 > 这是可以的，但流体贴图通常会覆盖一大片面积，因此最终的有效分辨率还是比较低。只要你没有使用极端的扭曲就没有问题。本教程中的扭曲非常强，所以非常明显。
 
 # 2 无缝循环
+
+现在，我们可以设置非统一的流动画了，但它会每秒重置一次。为了使其循环而没有间断，我们必须以某种方式将 UV 恢复到其原始值，然后再扭曲。时间只会前进，所以我们不能把失真反演回来，这样会导致水流反复来回而不是朝一个方向前进，我们必须找到另一种方式解决。
+
+## 2.1 权重混合
+
+我们无法避免重置失真，但我们可以尝试隐藏它。当我们接近最大失真时，我们可以将纹理淡化为黑色。如果我们也从一开始就以黑色淡入纹理开始，那么当整个表面都是黑色时会发生突然重置。虽然这是非常明显的，但至少没有视觉上的突变。
+
+为了实现衰减，让我们在 FlowUV 函数的输出中添加一个混合权重，将函数重命名为FlowUVW。权重放在第三个分量中，目前实际上是 1，那我们就从 1 开始。
+
+```c
+float3 FlowUVW (float2 uv, float2 flowVector, float time) {
+	float progress = frac(time);
+	float3 uvw;
+	uvw.xy = uv - flowVector * progress;
+	uvw.z = 1;
+	return uvw;
+}
+```
+
+我们可以将纹理与现在可用于着色器的权重相乘以淡化纹理。
+
+```c
+			float3 uvw = FlowUVW(IN.uv_MainTex, flowVector, _Time.y);
+			fixed4 c = tex2D(_MainTex, uvw.xy) * uvw.z * _Color;
+```
+
+## 2.2 锯齿波
+
+现在我们需要一个权重函数 w(p)，使 w(0) = w(1) = 0，在一半的地方达到最强，也就是 w(1/2) = 1. 最简单的符合要求的函数就是三角波 w(p) = 1 - |1 - 2p|. 试着把这个函数赋给权重。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/triangle.png)  
+*循环往复的三角波*  
+
+```c
+	uvw.z = 1 - abs(1 - 2 * progress);
+```
+[视频：三角波调制](https://thumbs.gfycat.com/ExcellentGlitteringGrub-mobile.mp4)
+
+> **为什么不用一个更平滑的函数？**
+> 你也可以试着用正弦波或者 smoothstep 函数，不过这些函数会使着色器变复杂，但不影响最终效果，一个三角波就够了。
+
+## 2.3 时间偏移
+
+虽然从技术上讲我们已经消除了视觉上的突变，但我们引入了黑色脉冲。脉冲非常明显，因为它在所有位置同时发生。如果我们可以在时间维度将其稀释，可能就不那么明显了。我们可以在表面上施加不同的时间偏移以实现这一点，低频的 Perlin 噪声非常适用于这种情况。我们不想再加一张纹理，而是将噪声打包在流体贴图中。[这里](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/flowmap.png)是一张与之前相同的流体贴图，但现在其 A 通道中存放着噪声，噪声与流向量无关。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/flowmap.png)  
+*A 通道里存了噪声的流体图*  
+
+为了明确指明流体贴图里的噪声，我们更新一下属性的标签。
+
+```c
+[NoScaleOffset] _FlowMap ("Flow (RG, A noise)", 2D) = "black" {}
+```
+
+对噪声采样，加到时间上，然后传给 FlowUVW。
+
+```c
+			float2 flowVector = tex2D(_FlowMap, IN.uv_MainTex).rg * 2 - 1;
+			float noise = tex2D(_FlowMap, IN.uv_MainTex).a;
+			float time = _Time.y + noise;
+			float3 uvw = FlowUVW(IN.uv_MainTex, flowVector, time);
+```
+
+![](https://thumbs.gfycat.com/TotalCaringDog-mobile.mp4)  
+*带偏移量的时间*
+
+> **为什么采样了两次？**
+> 为了演示一下，着色器的编译器会把他优化成一次采样。
+
+黑色脉冲还在，但已经变成了一种比较协调的在表面上扩散的波，与均匀脉冲相比，更容易混淆。此外还有个意外收获，时间偏移还使扭曲的进度不均匀，导致整体扭曲更加富于变化。
+
+## 2.4 把两种扭曲合起来
+
+如果不想使用黑色，我们也可以与其他东西混合，例如原始的无扭曲纹理。但这样我们会看到固定的纹理淡入淡出，会破坏流动的错觉。可以与另一个扭曲纹理混合以解决这个问题，这要求我们对纹理进行两次采样，每次采样具有不同的 UVW 数据。
+
+因此我们最终得到两个脉冲，A和B. 当A的权重为0时，B应为1，反之亦然。这样就去掉了黑色脉冲。这是通过将 B 的相位移动半个周期来完成的，也就是加0.5。但这都属于 FlowUVW 的工作细节，所以先添加一个布尔参数来指示它返回 UVW 的 A 变体还是 B 变体。
+
+```c
+float3 FlowUVW (float2 uv, float2 flowVector, float time, bool flowB) {
+	float phaseOffset = flowB ? 0.5 : 0;
+	float progress = frac(time + phaseOffset);
+	float3 uvw;
+	uvw.xy = uv - flowVector * progress;
+	uvw.z = 1 - abs(1 - 2 * progress);
+	return uvw;
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/double-triangle.png)  
+*A 和 B 的权重和总是 1*  
+
+我们现在必须调用两次 FlowUVW ，一次使用 false、一次使用 true 作为其最后一个参数。然后对纹理进行两次采样，分别乘以权重再相加以得到最终的反照率。
+
+```c
+			float time = _Time.y + noise;
+
+			float3 uvwA = FlowUVW(IN.uv_MainTex, flowVector, time, false);
+			float3 uvwB = FlowUVW(IN.uv_MainTex, flowVector, time, true);
+
+			fixed4 texA = tex2D(_MainTex, uvwA.xy) * uvwA.z;
+			fixed4 texB = tex2D(_MainTex, uvwB.xy) * uvwB.z;
+
+			fixed4 c = (texA + texB) * _Color;
+```
+
+![](https://thumbs.gfycat.com/AbleIdioticLeopard-mobile.mp4)  
+*混合两个相位*
+
+黑色脉冲已经消失了，它的波仍然存在，但现在作为两个阶段之间的过渡，就远没那么明显了。
+
+两个模式之间混合的副作用是它们的周期实际上减半，这使我们动画的总时间减半——它现在每秒循环两次。但是其实不必两次使用相同的模式，我们可以将 B 的 UV 坐标偏移半个单位，就能使图案不一样——而且还是使用相同的纹理——而不引入任何方向性偏移。
+
+```c
+uvw.xy = uv - flowVector * progress + phaseOffset;
+```
+
+![](https://thumbs.gfycat.com/GrimUntimelyCaecilian-mobile.mp4)  
+*A 和 B 的 UV 不同*
+
+因为我们使用规律的测试图案，所以 A 和 B 的白色网格线会重叠，但是他们的方块的颜色是不同的，结果是动画在两种颜色配置之间交替，并且每过一秒钟重复一次。
+
+## 2.5 UV 跳跃
+
+除了将 A 和 B 的 UV 恒定偏移半个单位外，还可以按照相位偏移 UV。这将导致动画随时间变化，因此要循环回完全相同的状态需要更长的时间。
+
+我们可以根据时间简单地滑动 UV 坐标，但这会导致整个动画滑动，引入方向性偏移。另外我们可以在每个阶段保持 UV 偏移恒定，并在相位变化时跳跃式偏移 UV 以避免视觉上的滑动。换句话说，我们每次权重为 0 时都会进行 UV 跳跃。方法是把 UV 加上一些跳跃式偏移，再乘以时间的整数部分。修改 FlowUVW 以支持此功能，并添加新参数以指定跳转向量。
+
+```c
+float3 FlowUVW (
+	float2 uv, float2 flowVector, float2 jump, float time, bool flowB
+) {
+	float phaseOffset = flowB ? 0.5 : 0;
+	float progress = frac(time + phaseOffset);
+	float3 uvw;
+	uvw.xy = uv - flowVector * progress + phaseOffset;
+	uvw.xy += (time - progress) * jump;
+	uvw.z = 1 - abs(1 - 2 * progress);
+	return uvw;
+}
+```
+
+给着色器添加两个参数以控制跳跃。使用两个 float 而非一个向量，以便使用范围滑杆，
