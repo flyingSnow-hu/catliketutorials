@@ -111,7 +111,8 @@ float2 FlowUV (float2 uv, float time) {
 		}
 ```
 
-[视频：沿对角线流动的 UV](https://thumbs.gfycat.com/HonoredJealousChinchilla-mobile.mp4)
+![](https://thumbs.gfycat.com/HonoredJealousChinchilla-small.gif)  
+*沿对角线流动的 UV*  
 
 因为我们对两个坐标增加了相同的量，所以纹理会对角滑动。 因为我们和时间做加法，所以它从右上角滑到左下角。因为我们正在使用纹理的默认封装模式，所以动画每秒都会循环。
 
@@ -210,11 +211,13 @@ float2 FlowUV (float2 uv, float2 flowVector, float time) {
 }
 ```
 
-[视频：每秒重置动画进度](https://thumbs.gfycat.com/BlissfulSoupyCornsnake-mobile.mp4)
+![](https://thumbs.gfycat.com/BlissfulSoupyCornsnake-small.gif)  
+*每秒重置动画进度*  
 
 我们现在可以看到纹理确实在不同方向和速度下发生扭曲。除了突然重置之外，最明显的是纹理随着扭曲的累积而迅速出现方块。这是由流体贴图的压缩引起的。 默认压缩设置使用DXT1格式，这是产生块的原因。使用比较均一的纹理时，这些误差通常不明显，但在对界限清晰的图案（如我们的测试纹理）变形时会非常明显。所以我在本教程的所有截图和视频中使用的是一个未压缩的流体贴图。
 
-[视频：未压缩的贴图](https://thumbs.gfycat.com/BreakableAbleIzuthrush-mobile.mp4)
+![](https://thumbs.gfycat.com/BreakableAbleIzuthrush-small.gif)  
+*未压缩的贴图*  
 
 > 为什么不使用高分辨率的流体贴图？
 > 这是可以的，但流体贴图通常会覆盖一大片面积，因此最终的有效分辨率还是比较低。只要你没有使用极端的扭曲就没有问题。本教程中的扭曲非常强，所以非常明显。
@@ -258,7 +261,9 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time) {
 ```c
 	uvw.z = 1 - abs(1 - 2 * progress);
 ```
-[视频：三角波调制](https://thumbs.gfycat.com/ExcellentGlitteringGrub-mobile.mp4)
+
+![](https://thumbs.gfycat.com/ExcellentGlitteringGrub-small.gif)  
+*三角波调制*  
 
 > **为什么不用一个更平滑的函数？**
 > 你也可以试着用正弦波或者 smoothstep 函数，不过这些函数会使着色器变复杂，但不影响最终效果，一个三角波就够了。
@@ -285,7 +290,7 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time) {
 			float3 uvw = FlowUVW(IN.uv_MainTex, flowVector, time);
 ```
 
-![](https://thumbs.gfycat.com/TotalCaringDog-mobile.mp4)  
+![](https://thumbs.gfycat.com/TotalCaringDog-small.gif)  
 *带偏移量的时间*
 
 > **为什么采样了两次？**
@@ -327,7 +332,7 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time, bool flowB) {
 			fixed4 c = (texA + texB) * _Color;
 ```
 
-![](https://thumbs.gfycat.com/AbleIdioticLeopard-mobile.mp4)  
+![](https://thumbs.gfycat.com/AbleIdioticLeopard-small.gif)  
 *混合两个相位*
 
 黑色脉冲已经消失了，它作为波仍然存在，但现在作为两个阶段之间的过渡，就远没那么明显了。
@@ -338,7 +343,7 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time, bool flowB) {
 uvw.xy = uv - flowVector * progress + phaseOffset;
 ```
 
-![](https://thumbs.gfycat.com/GrimUntimelyCaecilian-mobile.mp4)  
+![](https://thumbs.gfycat.com/GrimUntimelyCaecilian-small.gif)  
 *A 和 B 的 UV 不同*
 
 因为我们使用规律的测试图案，所以 A 和 B 的白色网格线会重叠，但是他们的方块的颜色是不同的，结果是动画在两种颜色配置之间交替，并且每过一秒钟重复一次。
@@ -392,9 +397,9 @@ float3 FlowUVW (
 		}
 ```
 
-![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/material.png)  
-[视频](https://thumbs.gfycat.com/PowerlessDenseArrowworm-mobile.mp4)  
-**跳跃值最大时的材质**
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/material.png) 
+![](https://thumbs.gfycat.com/PowerlessDenseArrowworm-small.gif)  
+*跳跃值最大时的材质*   
 
 在跳跃值最大时，我们每个循环序列有八个 UV 偏移。因为每个阶段经历两个偏移，且每个阶段长一秒，所以我们的动画现在每四秒循环一次。
 
@@ -402,15 +407,18 @@ float3 FlowUVW (
 
 为了更好地了解 UV 跳跃的工作原理，您可以将流向量设置为零，这样就可以专注于偏移。首先考虑没有任何跳跃的动画，即原始的交替模式。
 
-[视频：跳跃 0 ，时长 1 秒](https://thumbs.gfycat.com/TightRelievedGoa-mobile.mp4) 
+![](https://thumbs.gfycat.com/TightRelievedGoa-small.gif)  
+*跳跃 0 ，时长 1 秒*  
 
 可以看到每个方块在两种颜色之间交替。还可以看到交替的纹理偏移量是统一的 1/2，但并不是很明显，并且没有方向性偏移。接下来看一下两个维度都是最大跳跃值的动画。
 
-[视频：跳跃 0.25 ，时长 4 秒](https://thumbs.gfycat.com/FakeUnknownDassierat-mobile.mp4)
+![](https://thumbs.gfycat.com/FakeUnknownDassierat-small.gif)  
+*跳跃 0.25 ，时长 4 秒*  
 
 结果看起来和之前不同，因为跳跃四分之一会导致我们的测试纹理的网格线移动，在正方形和十字形之间交替。 白线仍然没有显示出方向性偏移，但色块已经有了方向性偏移。图案在对角移动，但不是特别明显。 它向前迈出半步，然后向后退四分之一，然后重复。如果我们使用 -0.25 的最小跳跃，那么它将向前迈出半步，然后向前迈出四分之一，然后重复。要使方向性偏移更明显，请使用非对称的跳跃，例如0.2。
 
-[视频：跳跃 0.2 ，时长 2.5 秒](https://thumbs.gfycat.com/RequiredIckyEnglishsetter-mobile.mp4)
+![](https://thumbs.gfycat.com/RequiredIckyEnglishsetter-small.gif)  
+*跳跃 0.2 ，时长 2.5 秒*  
 
 在这种情况下，白色网格线也似乎在移动。但是因为我们仍在使用相当接近于对称的大跳跃，所以可以将移动解释为多个方向，具体取决于您对图像如何看。如果你改变了看图的思路，就很容易丢掉你之前认为它流动的方向。
 
@@ -480,8 +488,8 @@ float3 FlowUVW (
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-tiling.png)
-[视频](https://thumbs.gfycat.com/AdorableHonorableAmericanbobtail-mobile.mp4) 
-*平铺设为 2，时长还是 1 秒*
+![](https://thumbs.gfycat.com/AdorableHonorableAmericanbobtail-small.gif)  
+*平铺设为 2，时长还是 1 秒*  
 
 当平铺设置为 2 时，动画的流速似乎是之前的两倍，原因仅仅是纹理被缩放过。当没有 UV 跳跃时，动画循环时长仍然是一秒。
 
@@ -510,7 +518,7 @@ float3 FlowUVW (
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-speed.png)  
-<iframe src='https://gfycat.com/ifr/OrderlyPoorIndochinahogdeer' frameborder='0' scrolling='no' allowfullscreen width='640' height='284'></iframe><p> <a href="https://gfycat.com/OrderlyPoorIndochinahogdeer">via Gfycat</a></p>
+![](https://thumbs.gfycat.com/OrderlyPoorIndochinahogdeer-small.gif)  
 *速度 0.5，时长现在是 2 秒*
 
 ## 3.3 流的强度
@@ -537,7 +545,7 @@ float3 FlowUVW (
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-flow-strength.png)  
-![](https://thumbs.gfycat.com/BabyishColorlessKiskadee-small.gif)
+![](https://thumbs.gfycat.com/BabyishColorlessKiskadee-small.gif)  
 *流强度 0.25，时长 2s*  
 
 ## 3.4 流偏移
@@ -594,7 +602,7 @@ float3 FlowUVW (
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-flow-offset.png)  
-![](https://thumbs.gfycat.com/ElementaryOptimisticGavial-small.gif)
+![](https://thumbs.gfycat.com/ElementaryOptimisticGavial-small.gif)  
 *流偏移设为 -0.5*  
 
 流量偏移为-0.5时，每个阶段的的峰值点时没有扭曲。但由于时间偏移的存在，整体结果仍然是扭曲的。
