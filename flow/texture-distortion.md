@@ -265,7 +265,7 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time) {
 ![](https://thumbs.gfycat.com/ExcellentGlitteringGrub-small.gif)  
 *三角波调制*  
 
-> **为什么不用一个更平滑的函数？**
+> **为什么不用一个更平滑的函数？**  
 > 你也可以试着用正弦波或者 smoothstep 函数，不过这些函数会使着色器变复杂，但不影响最终效果，一个三角波就够了。
 
 ## 2.3 时间偏移
@@ -293,7 +293,7 @@ float3 FlowUVW (float2 uv, float2 flowVector, float time) {
 ![](https://thumbs.gfycat.com/TotalCaringDog-small.gif)  
 *带偏移量的时间*
 
-> **为什么采样了两次？**
+> **为什么采样了两次？**  
 > 为了演示一下：着色器的编译器会把他优化成一次采样。
 
 黑色脉冲还在，但已经变成了一种比较协调的在表面上扩散的波，与均匀脉冲相比，更容易混淆。此外还有个意外收获，时间偏移还使扭曲的进度不均匀，导致整体扭曲更加富于变化。
