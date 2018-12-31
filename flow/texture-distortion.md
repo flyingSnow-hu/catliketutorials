@@ -219,6 +219,8 @@ float2 FlowUV (float2 uv, float2 flowVector, float time) {
 > 为什么不使用高分辨率的流体贴图？
 > 这是可以的，但流体贴图通常会覆盖一大片面积，因此最终的有效分辨率还是比较低。只要你没有使用极端的扭曲就没有问题。本教程中的扭曲非常强，所以非常明显。
 
+[unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animating-uv/animating-uv.unitypackage)
+
 # 2 无缝循环
 
 现在为止，我们设置了非统一的流动画，但它会每秒重置一次。为了使其循环而没有间断，我们必须以某种方式将 UV 恢复到其原始值，然后重新扭曲。时间只会前进，所以我们不能把失真简单反演，这样会导致水流反复来回而不是朝一个方向前进，我们必须找到另一种方式解决。
@@ -422,5 +424,181 @@ U 和 V 的跳跃不一定相同。除了影响方向性偏移，每个维度使
 
 在本节教程的后面部分，为了使循环时间更短，我会把跳跃值设为 0。
 
-# 3 动画调整
+[unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/seamless-looping/seamless-looping.unitypackage)
 
+# 3 调整动画
+
+现在我们有了一个基本的流动画，让我们再为它添加一些配置选项，这样就可以对它的外观进行一些调整。
+
+## 3.1 平铺
+
+首先，让我们可以平铺扭曲用的纹理。我们不能只依赖表面着色器的主平铺和偏移，因为它们也会影响流体贴图。所以，我们需要单独的纹理平铺配置。既然是用于扭曲，通常只有方形纹理才有意义，因此我们只需要一个平铺值。
+
+为了不使平铺影响流体贴图，我们必须在采样流体贴图之后再将其用于 UV ，不过要在添加阶段 B 的偏移之前，因此必须在 FlowUVW 中完成，这意味着我们的函数需要一个平铺参数。
+
+```c
+float3 FlowUVW (
+	float2 uv, float2 flowVector, float2 jump,
+	float tiling, float time, bool flowB
+) {
+	…
+//	uvw.xy = uv - flowVector * progress + phaseOffset;
+	uvw.xy = uv - flowVector * progress;
+	uvw.xy *= tiling;
+	uvw.xy += phaseOffset;
+	…
+}
+```
+
+给我们的着色器添加一个平铺属性，默认值为1。
+
+```c
+		_UJump ("U jump per phase", Range(-0.25, 0.25)) = 0.25
+		_VJump ("V jump per phase", Range(-0.25, 0.25)) = -0.25
+		_Tiling ("Tiling", Float) = 1
+```
+
+然后添加变量并将其传递给 FlowUVW。
+
+```c
+		float _UJump, _VJump, _Tiling;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+			float3 uvwA = FlowUVW(
+				IN.uv_MainTex, flowVector, jump, _Tiling, time, false
+			);
+			float3 uvwB = FlowUVW(
+				IN.uv_MainTex, flowVector, jump, _Tiling, time, true
+			);
+
+			…
+		}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-tiling.png)
+[视频](https://thumbs.gfycat.com/AdorableHonorableAmericanbobtail-mobile.mp4) 
+*平铺设为 2，时长还是 1 秒*
+
+当平铺设置为 2 时，动画的流速似乎是之前的两倍，原因仅仅是纹理被缩放过。当没有 UV 跳跃时，动画循环时长仍然是一秒。
+
+## 3.2 动画速度
+
+缩放时间可以直接控制动画的速度。这会影响整个动画，也影响其持续时间。为着色器添加一个速度属性以支持此功能。
+
+```c
+		_Tiling ("Tiling", Float) = 1
+		_Speed ("Speed", Float) = 1
+```
+
+只需将 _Time.y 乘以相应的变量即可，然后再加噪声值，因此时间偏移不受影响。
+
+```c
+		float _UJump, _VJump, _Tiling, _Speed;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			float2 flowVector = tex2D(_FlowMap, IN.uv_MainTex).rg * 2 - 1;
+			float noise = tex2D(_FlowMap, IN.uv_MainTex).a;
+			float time = _Time.y * _Speed + noise;
+			…
+		}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-speed.png)  
+<iframe src='https://gfycat.com/ifr/OrderlyPoorIndochinahogdeer' frameborder='0' scrolling='no' allowfullscreen width='640' height='284'></iframe><p> <a href="https://gfycat.com/OrderlyPoorIndochinahogdeer">via Gfycat</a></p>
+*速度 0.5，时长现在是 2 秒*
+
+## 3.3 流的强度
+
+流速由流体贴图决定。我们可以通过调整动画速度来加快或减慢速度，但这也会影响阶段和动画的时长。改变表观流速的另一种方法是缩放流向量。通过调节流量的强度，我们可以加快减慢速度，甚至逆转它，而不会影响时间。这也改变了扭曲量。为达到此目的，向着色器添加 Flow Strength 属性。
+
+```c
+		_Speed ("Speed", Float) = 1
+		_FlowStrength ("Flow Strength", Float) = 1
+```
+
+只需将流向量乘以相应的变量即可。
+
+```c
+		float _UJump, _VJump, _Tiling, _Speed, _FlowStrength;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			float2 flowVector = tex2D(_FlowMap, IN.uv_MainTex).rg * 2 - 1;
+			flowVector *= _FlowStrength;
+			…
+		}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-flow-strength.png)  
+![](https://thumbs.gfycat.com/BabyishColorlessKiskadee-small.gif)
+*流强度 0.25，时长 2s*  
+
+## 3.4 流偏移
+
+另一个可能的调整是控制动画开始的位置。到目前为止，我们在每个阶段开始时都处于零扭曲状态，进展到最大扭曲。由于相位的权重在中间点达到 1 ，所以当扭曲为一半强度时，模式最清晰。 因此，我们大多数时候看到的是半扭曲的纹理。这样配置通常很好，但并非总是如此。例如，在 Portal 2 中，漂浮的废墟纹理经常呈现的是其未扭曲状态。这是通过扭曲 UV 坐标时将流量偏移 -0.5 来完成的。
+
+我们也来支持这个，向 FlowUVW 添加 flowOffset 参数。把 progress 偏移 flowOffset 之后再与流向量相乘。
+
+```c
+float3 FlowUVW (
+	float2 uv, float2 flowVector, float2 jump,
+	float flowOffset, float tiling, float time, bool flowB
+) {
+	float phaseOffset = flowB ? 0.5 : 0;
+	float progress = frac(time + phaseOffset);
+	float3 uvw;
+	uvw.xy = uv - flowVector * (progress + flowOffset);
+	uvw.xy *= tiling;
+	uvw.xy += phaseOffset;
+	uvw.xy += (time - progress) * jump;
+	uvw.z = 1 - abs(1 - 2 * progress);
+	return uvw;
+}
+```
+
+接下来，添加一个属性来控制着色器的流偏移量。实践中常用值为 0 和 -0.5，也可以尝试其他值。
+
+```c
+		_FlowStrength ("Flow Strength", Float) = 1
+		_FlowOffset ("Flow Offset", Float) = 0
+```
+
+把相关变量传给 FlowUVW.
+
+```c
+		float _UJump, _VJump, _Tiling, _Speed, _FlowStrength, _FlowOffset;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+			float3 uvwA = FlowUVW(
+				IN.uv_MainTex, flowVector, jump,
+				_FlowOffset, _Tiling, time, false
+			);
+			float3 uvwB = FlowUVW(
+				IN.uv_MainTex, flowVector, jump,
+				_FlowOffset, _Tiling, time, true
+			);
+
+			…
+		}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/material-flow-offset.png)  
+![](https://thumbs.gfycat.com/ElementaryOptimisticGavial-small.gif)
+*流偏移设为 -0.5*  
+
+流量偏移为-0.5时，每个阶段的的峰值点时没有扭曲。但由于时间偏移的存在，整体结果仍然是扭曲的。
+
+[unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/animation-tweaks.unitypackage)
+
+# 4 纹理
