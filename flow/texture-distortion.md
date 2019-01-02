@@ -1,8 +1,5 @@
-流体之一 纹理变形
+流体之一 纹理变形 · 伪造流体
 ======
-伪造流体
-------
-
 [原教程传送门](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/)
 ---
 
@@ -874,5 +871,6 @@ float3 FlowUVW (
 
 一个可信的水流效果，最重要的是它的表面法线动画的质量。如果法线效果很好，你可以进一步添加一些更高级的反射、透明度和折射等效果——但即使没有这些附加，其表面也可以成为基本的水面了。
 
-下一课是[定向流体](https://catlikecoding.com/unity/tutorials/flow/directional-flow/)
+下一课是[定向流体](https://catlikecoding.com/unity/tutorials/flow/directional-flow/)  
+
 [unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/texturing.unitypackage)
