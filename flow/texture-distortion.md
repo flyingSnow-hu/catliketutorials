@@ -3,6 +3,9 @@
 伪造流体
 ------
 
+[原教程传送门](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/)
+---
+
  * 使用流体图调整UV坐标
  * 创建无缝动画循环
  * 控制流体外观
@@ -610,3 +613,266 @@ float3 FlowUVW (
 [unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/animation-tweaks/animation-tweaks.unitypackage)
 
 # 4 纹理
+
+到此，我们的扭曲流体着色器功能就完整了。让我们换掉测试纹理，看看它会变成什么样子。
+
+## 4.1 抽象的水
+
+扭曲效应的最常见用途是模拟水面。但由于扭曲发生在各个方向，我们无法使用纹理指定流向。而如果不指出方向，就不可能制作出正确的波浪，但好在我们不需要完全现实。当纹理扭曲和混合时，它只需要看起来像水。例如，[这里](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water.png)有一张简单的噪声纹理，它叠加了相差八度的低频 Perlin 和 Voronoi 噪声。它是水的抽象灰度表示，暗部代表波谷低处，亮部代表波浪高处。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water.png)  
+*水纹理*
+
+将此纹理用于材质的反照率贴图。另外，我没有使用 UV 跳跃，平铺 3，速度 0.5 ，流强度 0.1，没有流偏移。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/material.png)  
+![](https://thumbs.gfycat.com/CaringWideeyedGoa-small.gif)  
+*流动的水*
+
+尽管噪声纹理本身看起来并不像水，但是扭曲和动画效果使它变像了。您还可以通过临时将流强度设置为零，以检查没有扭曲的时候其外观如何。流强度为零代表静止的水，它应该看起来——至少在某种程度上——是可以接受的。
+
+![](https://thumbs.gfycat.com/WigglyOrganicDogwoodtwigborer-small.gif)  
+*静止的水*
+
+## 4.2 法线贴图
+
+反照率贴图只是一个预览作用，因为流动的水主要取决于其表面垂直方向的变化，垂直方向的变化改变了水面与光的相互作用。 我们需要一个法线贴图，[这里](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water-normal.png)有一张，是将反照率纹理解释为高度图而创建出来的，但高度缩放仅为 0.1，因此效果不是太强。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water-normal.png)  
+*法线贴图*
+
+为法线贴图添加一个着色器属性：
+
+```c
+		[NoScaleOffset] _FlowMap ("Flow (RG, A noise)", 2D) = "black" {}
+		[NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+```
+
+对 A 和 B 分别采样法线贴图，按权平均再归一化，作为最终的法线值。
+
+```c
+		sampler2D _MainTex, _FlowMap, _NormalMap;
+		…
+		
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+			float3 normalA = UnpackNormal(tex2D(_NormalMap, uvwA.xy)) * uvwA.z;
+			float3 normalB = UnpackNormal(tex2D(_NormalMap, uvwB.xy)) * uvwB.z;
+			o.Normal = normalize(normalA + normalB);
+				
+			fixed4 texA = tex2D(_MainTex, uvwA.xy) * uvwA.z;
+			fixed4 texB = tex2D(_MainTex, uvwB.xy) * uvwB.z;
+				
+			…
+		}
+```
+
+将法线贴图添加到材质中,同时将其平滑度增加到 0.7，然后改变光线，以获得大量的高光反射。我保持视角没变，但将方向光旋转 180° 到（50,150,0）。同时将反照率设置为黑色，因此我们看到的只有法线运动的效果。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/material-normals.png)  
+![](https://thumbs.gfycat.com/TimelyMajorArchaeopteryx-small.gif)  
+*流动的水*
+
+法线贴图的扭曲动画创造了一种令人信服的水流错觉。但是当流动强度为零时，它会如何？
+
+![](https://thumbs.gfycat.com/SomeCornyIriomotecat-small.gif)  
+*静止的水*  
+
+乍一看可能还不错，但如果你专注于盯住某个特定的亮点，很快就会发现它们其实是在两个状态之间交替。幸运的是，这可以通过非零的跳跃值来解决。
+
+![](https://thumbs.gfycat.com/WarmheartedDemandingBat-small.gif)  
+*跳跃值最大，速度为 1*
+
+## 4.3 导数贴图
+
+虽然最后得到的法线看起来不错，但对法线求平均没有多大意义。如 [Rendering 第六节凹凸](https://catlikecoding.com/unity/tutorials/rendering/part-6/)中所讲的，正确的方法是将法线向量转换为高度的导数，求和之后再转换回法线向量。对于横穿表面的波浪尤其如此。
+
+由于我们通常将法线贴图压缩成 DXT5nm 格式，因此我们首先必须重建两个法线的Z分量—— 这需要求平方根——然后转换为导数、求和再归一化。但是我们其实不需要原始法向量，因此我们也可以直接将导数存储在贴图中以跳过转换。
+
+导数贴图的工作方式与法线贴图类似，不同之处在于它存储的是 X 和 Y 维度的高度导数。但是，如果没有额外的缩放，导数贴图只能支持不高于 45° 的表面角度，也就是导数不超过 1。 通常来说不会使用这么陡峭的波，所以这种限制是可以接受的。
+
+[这里](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water-derivative-height.png)是一张导数贴图，所描述的曲面和之前的法线贴图完全相同，X 的导数存储在 A 通道中，Y 的导数存储在 G 通道中，就和法线贴图一样。除此之外，B 通道中还包含原始高度图。再次说明，导数是将高度缩放到 0.1 倍来计算的。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/water-derivative-height.png)  
+*导数贴图 加 高度图*
+
+> **为什么不把高度图也缩放到 0.1 倍？**   
+> 高度以原倍数存放，是为了保证精度。
+
+由于这张图不是法线贴图，要作为普通的 2D 纹理导入，确保不要选择 sRGB 选项。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/derivative-height-import.png)  
+*导入设置*  
+
+把法线的属性换成新的导数-高度图：
+
+```c
+//		[NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+		[NoScaleOffset] _DerivHeightMap ("Deriv (AG) Height (B)", 2D) = "black" {}
+```
+
+继续替换掉着色器变量，采样和归一化的指令。 我们不能再使用 UnpackNormal，因此创建一个自定义 UnpackDerivativeHeight 函数，将正确的数据通道放在浮点向量中并解码导数。
+
+```c
+		sampler2D _MainTex, _FlowMap, _DerivHeightMap;
+		…
+		
+		float3 UnpackDerivativeHeight (float4 textureData) {
+			float3 dh = textureData.agb;
+			dh.xy = dh.xy * 2 - 1;
+			return dh;
+		}
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+//			float3 normalA = UnpackNormal(tex2D(_NormalMap, uvwA.xy)) * uvwA.z;
+//			float3 normalB = UnpackNormal(tex2D(_NormalMap, uvwB.xy)) * uvwB.z;
+//			o.Normal = normalize(normalA + normalB);
+
+			float3 dhA =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwA.xy)) * uvwA.z;
+			float3 dhB =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwB.xy)) * uvwB.z;
+			o.Normal = normalize(float3(-(dhA.xy + dhB.xy), 1));
+
+			…
+		}
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/material-derivative.png)  
+*法线贴图替换成导数贴图*
+
+现在得到的表面法线看起来与使用法线贴图时几乎相同，而且计算成本更低。由于我们现在也可以访问高度数据，也可以使用它来为表面着色。 这对于调试很有用，现在暂时替换原始的反照率。
+
+```c
+			o.Albedo = c.rgb;
+			o.Albedo = dhA.z + dhB.z;
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/height-as-color.jpg)  
+*以高度为反照率*
+
+虽然高度数据是相同的，但现在表面看起来比使用反照率纹理时更亮。是因为我们现在使用线性数据，而反照率纹理被解释为 sRGB 数据。 为了得到相同的结果，我们必须手动将高度数据从伽马空间转换为线性空间。可以简单地进行近似估算。
+
+```c
+			o.Albedo = pow(dhA.z + dhB.z, 2);
+```
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/height-squared-as-color.jpg)  
+*使用高度的平方*  
+
+## 4.4 高度缩放
+
+使用导数贴图而非法向量的另一个好处是它们可以很容易地缩放。导出的法线将与调整后的曲面相匹配，使得波浪的高度得以正确地缩放。让我们为着色器添加一个高度缩放属性以支持它。
+
+```c
+		_FlowOffset ("Flow Offset", Float) = 0
+		_HeightScale ("Height Scale", Float) = 1
+```
+
+我们需要做的就是将高度缩放乘以采样的导数-高度数据。
+
+```c
+		float _HeightScale;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+			float3 dhA =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwA.xy)) *
+				(uvwA.z * _HeightScale);
+			float3 dhB =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwB.xy)) *
+				(uvwB.z * _HeightScale);
+			…
+		}
+```
+
+但我们可以更进一步,根据流速变化高度缩放。这个想法核心是，流量大时，波浪更高;流量弱时波浪更低。要控制此项，请添加第二个高度缩放属性，以根据流速调节高度。原有的属性保持不变，把两者结合起来求出最终的高度缩放。
+
+```c
+		_HeightScale ("Height Scale, Constant", Float) = 0.25
+		_HeightScaleModulated ("Height Scale, Modulated", Float) = 0.75
+```
+
+流速等于流向量的长度。 将其乘以调制缩放，加上常数缩放，并将其用作导数-高度的最终缩放。
+
+```c
+		float _HeightScale, _HeightScaleModulated;
+
+		…
+
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+			…
+
+			float finalHeightScale =
+				length(flowVector) * _HeightScaleModulated + _HeightScale;
+
+			float3 dhA =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwA.xy)) *
+				(uvwA.z * finalHeightScale);
+			float3 dhB =
+				UnpackDerivativeHeight(tex2D(_DerivHeightMap, uvwB.xy)) *
+				(uvwB.z * finalHeightScale);
+			…
+		}
+```
+
+虽然您可以将使高度缩放完全基于流速，但最好使用至少一个微小的常数缩放，这样在没有流的情况下表面不会变平。例如，使用 0.1 的常数缩放和 9 的调制缩放。它们的和不需要等于 1 ，只取决于您希望最终法线的强度以及您想要的变化量。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/material-height-strength.png)  
+![](https://thumbs.gfycat.com/IdealFreeAlaskajingle-small.gif)  
+*常数缩放加调制缩放*  
+
+## 4.5 流加速度
+
+流速可以存储在流体贴图中，而不需要实时计算。虽然采样期间的滤波可能非线性地改变矢量的长度，但是仅当对两个差异很大的矢量插值时，这种差异才变得显着。只有在流体贴图中发生突然的方向变化时才会出现这种情况。我们没有这些问题，对预存储的速度矢量采样，结果几乎是相同的。另外，在调制高度缩放时，精确匹配并不重要。
+
+[这里](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/flow-speed-noise.png)是和之前完全一样的流体贴图，不过这次在 B 通道存放了速率。
+
+![](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/flow-speed-noise.png)  
+*在 B 通道存放了速率的流体贴图*  
+
+用采样数据代替计算的速率，由于速率没有方向，不需要和速度向量一样转换。
+
+```c
+		void surf (Input IN, inout SurfaceOutputStandard o) {
+//			float flowVector = tex2D(_FlowMap, IN.uv_MainTex).rg * 2 - 1;
+			float3 flow = tex2D(_FlowMap, IN.uv_MainTex).rgb;
+			flow.xy = flow.xy * 2 - 1;
+			flow *= _FlowStrength;
+			…
+
+			float3 uvwA = FlowUVW(
+				IN.uv_MainTex, flow.xy, jump,
+				_FlowOffset, _Tiling, time, false
+			);
+			float3 uvwB = FlowUVW(
+				IN.uv_MainTex, flow.xy, jump,
+				_FlowOffset, _Tiling, time, true
+			);
+
+			float finalHeightScale =
+				flow.z * _HeightScaleModulated + _HeightScale;
+
+			…
+		}
+```
+
+最后的最后恢复原来的反照率。我还将材质颜色更改为蓝色，指定为（78,131,169）。
+
+```c
+//			o.Albedo = pow(dhA.z + dhB.z, 2);
+```
+
+![](https://thumbs.gfycat.com/VioletSarcasticDikkops-small.gif)  
+*最终的水流，跳跃值最大*
+
+一个可信的水流效果，最重要的是它的表面法线动画的质量。如果法线效果很好，你可以进一步添加一些更高级的反射、透明度和折射等效果——但即使没有这些附加，其表面也可以成为基本的水面了。
+
+下一课是[定向流体](https://catlikecoding.com/unity/tutorials/flow/directional-flow/)
+[unitypackage](https://catlikecoding.com/unity/tutorials/flow/texture-distortion/texturing/texturing.unitypackage)
