@@ -134,8 +134,7 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 ## 1.3 有限差分
 
-我们现在处理的是二维的纹理数据，有 U 和 V 两个维度，高度可以认为是向上的第三维。所以我们也可以换一个说法，纹理代表了一个函数 \\(\textit{f}(u,v) = \textit{h}\\) 。一开始我们只把注意力集中在 U 维度上，所以函数变成\(\textit{f}(u) = \textit{h}\)  
-$$\textit{f}(u) = \textit{h}$$ 
+我们现在处理的是二维的纹理数据，有 U 和 V 两个维度，高度可以认为是向上的第三维。所以我们也可以换一个说法，纹理代表了一个函数 $\textit{f}(u,v) = \textit{h}$。一开始我们只把注意力集中在 U 维度上，所以函数变成$\textit{f}(u) = \textit{h}$  
 。我们能从其中解出法线吗？
   
 下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
