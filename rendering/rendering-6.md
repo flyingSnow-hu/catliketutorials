@@ -1,8 +1,10 @@
-<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=default"/>
+
 渲染之六 凹凸
 ======
 [原教程传送门](https://catlikecoding.com/unity/tutorials/rendering/part-6/)
 ---
+
+<script type="text/javascript" src="http://cdn.mathjax.org/mathjax/latest/MathJax.js?config=default"></script>
 
  * 变换法线模拟凹凸
  * 从高度场计算法线
