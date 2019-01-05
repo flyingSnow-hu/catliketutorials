@@ -197,12 +197,9 @@ float4 _HeightMap_TexelSize;
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/rotated.png)  
 *使用真正的法线*  
-  
-下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
-[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangents.unitypackage)
 
-> 向量旋转的原理是？
-> 要把一个 2D 向量逆时针旋转 90°，需要把 XY 分量交换位置，然后把新的 X 分量取相反数。最后得到 $\begin{bmatrix}-f'(u) \\\\ 1 \\\\ 0 \end{bmatrix}$.
+> 向量旋转的原理是？  
+> 要把一个 2D 向量逆时针旋转 90°，需要把 XY 分量交换位置，然后把新的 X 分量取相反数。最后得到 $\begin{bmatrix}-f'(u) \\\\ 1 \\\\ 0 \end{bmatrix}$.  
 > ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/vector-rotation.png)  
 > *2D 向量旋转 90°*  
 
@@ -260,7 +257,7 @@ float4 _HeightMap_TexelSize;
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/normals-details.png)  
 *完整的法线*  
 
-> **叉积是个啥？**
+> **叉积是个啥？**   
 > (略略略)
 
 计算切向量的叉积，可以得到 $\begin{bmatrix}0 \\\\ f_{v}^{'} \\\\ 1 \end{bmatrix} × \begin{bmatrix}0 \\\\ f_{u}^{'} \\\\ 1 \end{bmatrix} = \begin{bmatrix}-f_{u}^{'} \\\\ 1 \\\\ -f_{v}^{'} \end{bmatrix}$. 所以我们可以直接构造法向量，而不需要依赖 cross 函数。
@@ -287,3 +284,7 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 # 2 法线贴图
 
+
+  
+下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
+[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangents.unitypackage)
