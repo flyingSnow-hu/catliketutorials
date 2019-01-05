@@ -134,16 +134,29 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 ## 1.3 有限差分
 
-我们现在处理的是二维的纹理数据，有 U 和 V 两个维度，高度可以认为是向上的第三维。所以我们也可以换一个说法，纹理代表了一个函数 $f(u,v) = h$。一开始我们只把注意力集中在 U 维度上，所以函数变成 $f(u) = h$ 。我们能从中解出法线吗？
+我们现在处理的是二维的纹理数据，有 U 和 V 两个维度，高度可以认为是方向向上的第三维。所以我们也可以换一个说法，纹理代表了一个函数 $f(u,v) = h$。一开始我们只考虑 U 维度，函数变成 $f(u) = h$ 。我们能从中解出法线吗？
 
-如果我们知道函数的斜率，那么可以用它来计算任何一点的法线。 斜率由 $h$ 的变化率定义，也就是其导数 $h'$。由于 $h$ 是一个函数的值，所以 $h'$ 也是一个函数的值。所以我们有导数函数 $f'(u) = h'$。
+如果我们知道函数的斜率，那么可以用它来计算任何一点的法线。 斜率由 $h$ 的变化率定义，也就是其导数 $h'$。由于 $h$ 是某一个函数的值，所以 $h'$ 也是某一个函数的值。所以我们有导数函数 $f'(u) = h'$。
+
+不幸的是，我们不知道这些函数原型是什么，不过我们可以近似求解。我们可以比较纹理上的两个点的高度。例如，极端一点的例子，比较一下 U = 0 和 U = 1。这两个采样点之间的差值就是这一段的变化率，用函数表示，就是 $f(1) - f(0)$. 我们以此为基础构建切向量，$\begin{bmatrix}1 \\ f(1) - f(0) \\ 0 \end{bmatrix}$
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/tangent-diagram.png)  
+*从 $\begin{bmatrix}0 \\ f(0) \end{bmatrix}$ 到 $\begin{bmatrix}1 \\ f(1) \end{bmatrix}$ 的切向量*
+
+这当然是真实切线向量的粗略近似。它将整个纹理视为线性斜率。为了做得更好，我们可以对两个更近的点采样。例如，U 坐标为 0 和 ½。这两个点之间的变化率是 $f(\frac{1}{2}) - f(0)$ 每半单位 U<font color=red><sup>这句话的结构类似于“工资增长的幅度是2元每半年”</sup></font>。因为整单位的变化率比较好处理，所以我们把变化率除以点的距离，所以得到 $\frac{f(\frac{1}{2}) - f(0)}{\frac{1}{2}} = 2(f(\frac{1}{2}) - f(0))$. 由此得到切向量 $\begin{bmatrix}1 \\ 2(f(\frac{1}{2}) - f(0)) \\ 0 \end{bmatrix}$.
+
+通常来说，我们必须相对于每个渲染的片段的 U 坐标执行此运算。设到下一个点的距离为常数 $\delta$，则导函数可以近似为 $f'(u) \approx \frac{f(u+\delta) - f(u)}{\delta}$.
+
+δ 越小，我们的近似值就越接近真实导数值。当然它不能变成零，但是当 δ 趋近于无穷小时，可以得到$f'(u)=\lim_{\delta\to0}\frac{f(u+\delta)-f(u)}{\delta}$. 这个对导数求近似值的方法被称为有限差分。由这个方法，我们可以得到任一点的切向量$\begin{bmatrix}1 \\ f'(u) \\ 0 \end{bmatrix}$.
+
+## 1.4 
 
 
-$[[1],[f(1) - f(0)],[0]]$
 
 
   
 下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
 [unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangents.unitypackage)
+
 
 
