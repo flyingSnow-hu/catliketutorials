@@ -138,25 +138,152 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 如果我们知道函数的斜率，那么可以用它来计算任何一点的法线。 斜率由 $h$ 的变化率定义，也就是其导数 $h'$。由于 $h$ 是某一个函数的值，所以 $h'$ 也是某一个函数的值。所以我们有导数函数 $f'(u) = h'$。
 
-不幸的是，我们不知道这些函数原型是什么，不过我们可以近似求解。我们可以比较纹理上的两个点的高度。例如，极端一点的例子，比较一下 U = 0 和 U = 1。这两个采样点之间的差值就是这一段的变化率，用函数表示，就是 $f(1) - f(0)$. 我们以此为基础构建切向量，$\begin{bmatrix}1 \\ f(1) - f(0) \\ 0 \end{bmatrix}$
+不幸的是，我们不知道这些函数原型是什么，不过我们可以近似求解。我们可以比较纹理上的两个点的高度。例如，极端一点的例子，比较一下 U = 0 和 U = 1。这两个采样点之间的差值就是这一段的变化率，用函数表示，就是 $f(1) - f(0)$. 我们以此为基础构建切向量，$\begin{bmatrix}1 \\\\ f(1) - f(0) \\\\ 0 \end{bmatrix}$
 
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/tangent-diagram.png)  
-*从 $\begin{bmatrix}0 \\ f(0) \end{bmatrix}$ 到 $\begin{bmatrix}1 \\ f(1) \end{bmatrix}$ 的切向量*
+*从 $\begin{bmatrix}0 \\\\ f(0) \end{bmatrix}$ 到 $\begin{bmatrix}1 \\\\ f(1) \end{bmatrix}$ 的切向量*
 
-这当然是真实切线向量的粗略近似。它将整个纹理视为线性斜率。为了做得更好，我们可以对两个更近的点采样。例如，U 坐标为 0 和 ½。这两个点之间的变化率是 $f(\frac{1}{2}) - f(0)$ 每半单位 U<font color=red><sup>这句话的结构类似于“工资增长的幅度是2元每半年”</sup></font>。因为整单位的变化率比较好处理，所以我们把变化率除以点的距离，所以得到 $\frac{f(\frac{1}{2}) - f(0)}{\frac{1}{2}} = 2(f(\frac{1}{2}) - f(0))$. 由此得到切向量 $\begin{bmatrix}1 \\ 2(f(\frac{1}{2}) - f(0)) \\ 0 \end{bmatrix}$.
+这当然是真实切线向量的粗略近似。它将整个纹理视为线性斜率。为了做得更好，我们可以对两个更近的点采样。例如，U 坐标为 0 和 ½。这两个点之间的变化率是 $f(\frac{1}{2}) - f(0)$ 每半单位 U <font color="red"><sub>这句话的结构类似于“工资增长的幅度是2元每半年”</sub></font>。因为整单位的变化率比较好处理，所以我们把变化率除以点的距离，所以得到 $\frac{f(\frac{1}{2}) - f(0)}{\frac{1}{2}} = 2(f(\frac{1}{2}) - f(0))$. 由此得到切向量 $\begin{bmatrix}1 \\\\ 2(f(\frac{1}{2}) - f(0)) \\\\ 0 \end{bmatrix}$.
 
 通常来说，我们必须相对于每个渲染的片段的 U 坐标执行此运算。设到下一个点的距离为常数 $\delta$，则导函数可以近似为 $f'(u) \approx \frac{f(u+\delta) - f(u)}{\delta}$.
 
-δ 越小，我们的近似值就越接近真实导数值。当然它不能变成零，但是当 δ 趋近于无穷小时，可以得到$f'(u)=\lim_{\delta\to0}\frac{f(u+\delta)-f(u)}{\delta}$. 这个对导数求近似值的方法被称为有限差分。由这个方法，我们可以得到任一点的切向量$\begin{bmatrix}1 \\ f'(u) \\ 0 \end{bmatrix}$.
+δ 越小，我们的近似值就越接近真实导数值。当然它不能变成零，但是当 δ 趋近于无穷小时，可以得到$f'(u)=\lim_{\delta\to0}\frac{f(u+\delta)-f(u)}{\delta}$. 这个对导数求近似值的方法被称为有限差分。由这个方法，我们可以得到任一点的切向量$\begin{bmatrix}1 \\\\ f'(u) \\\\ 0 \end{bmatrix}$.
 
-## 1.4 
+## 1.4 从切线到法线
 
+在我们的着色器里可用的 δ 值是什么样的呢？最小的有意义的值就是纹理的一个像素的距离。在着色器里，可以通过一个带有 _TexelSize 后缀的 float4 变量获取这个值。这个变量由 Unity 自动设置，如同 _ST 变量一样。
 
+```c
+sampler2D _HeightMap;
+float4 _HeightMap_TexelSize;
+```
 
+> **_TexelSize 里存的是什么？**  
+> 它的前两个分量存放的是纹素尺寸，也就是 U 和 V 的分母 <font color="red"><sub>也就是像素数量的倒数</sub></font>。后两个分量是像素数量。例如一个 256×128 的纹理，对应的分量是 (0.00390625, 0.0078125, 256, 128)。
 
+我们现在可以对这个纹理采样两次，计算高度导数，然后构建切向量，我们直接把他作为法向量使用。
+```c
+    float2 delta = float2(_HeightMap_TexelSize.x, 0);
+    float h1 = tex2D(_HeightMap, i.uv);
+    float h2 = tex2D(_HeightMap, i.uv + delta);
+    i.normal = float3(1, (h2 - h1) / delta.x, 0);
+
+    i.normal = normalize(i.normal);
+```
+
+实际上由于最后我们还是要归一化，所以可以把切向量缩放 δ 倍，这样省掉一次除法而且还提高了精度。
+
+```c
+    i.normal = float3(delta.x, h2 - h1, 0);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/tangent.png)  
+*把切向量作为法向量*  
+
+我们得到了一个非常锐利的结果。那是因为高度差达到了一个单位的范围，从而产生非常陡峭的斜坡。由于扰动法线实际上并没有真正改变表面，所以我们不希望出现如此巨大的差异，可以把高度加一个任意的缩放。我们这里将高度范围缩小到一个纹素，也就是将高度差乘以δ，或者简单地将切线中的 δ 替换为 1。
+
+```c
+    i.normal = float3(1, h2 - h1, 0);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/scaled-height.png)  
+*缩放之后的高度*
+
+看起来开始变好了，但光照是错误的，太暗了。那是因为我们直接使用切线作为法线，要将其转换为朝向上的法向量，我们必须围绕Z轴把切线旋转 90°。
+
+```c
+    i.normal = float3(h1 - h2, 1, 0);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/rotated.png)  
+*使用真正的法线*  
   
 下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
 [unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangents.unitypackage)
 
+> 向量旋转的原理是？
+> 要把一个 2D 向量逆时针旋转 90°，需要把 XY 分量交换位置，然后把新的 X 分量取相反数。最后得到 $\begin{bmatrix}-f'(u) \\\\ 1 \\\\ 0 \end{bmatrix}$.
+> ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/vector-rotation.png)  
+> *2D 向量旋转 90°*  
 
+## 1.5 中心差分
+
+我们使用有限差分来近似创建法向量。具体地，通过使用前向差分方法。我们取一个点，然后向一个方向看以确定斜率。最后法线会偏向该方向。为了更好地逼近法线，我们可以在两个方向上移动采样点。这使线性近似在当前点上居中，称为中心差分法。这样的导数函数变为 $f'(u)=\lim_{\delta\to0}\frac{f(u+\frac{\delta}{2})-f(u-\frac{\delta}{2})}{\delta}$.
+
+```c
+    float2 delta = float2(_HeightMap_TexelSize.x * 0.5, 0);
+    float h1 = tex2D(_HeightMap, i.uv - delta);
+    float h2 = tex2D(_HeightMap, i.uv + delta);
+    i.normal = float3(h1 - h2, 1, 0);
+```
+
+这种方法轻微地移动了凹凸，使其和高度场更好地对齐。除此之外并没有修改其形状。
+
+## 1.6 两个维度都加上
+
+目前为止，我们创建的法线仅考虑了 U 的变化。我们一直在使用函数 $f(u,v)$ 对 $u$ 的偏导数，也就是 $f_{u}^{'}(u,v)$，简写为 $f_{u}^{'}$. 我们也可以沿 V 方向创建法线，也就是 $f_{v}^{'}$. 这样的话，切向量就是 $\begin{bmatrix}0 \\\\ f_{v}^{'} \\\\ 1 \end{bmatrix}$. 法向量是 $\begin{bmatrix}0 \\\\ 1 \\\\ -f_{v}^{'} \end{bmatrix}$.
+```c
+    float2 du = float2(_HeightMap_TexelSize.x * 0.5, 0);
+    float u1 = tex2D(_HeightMap, i.uv - du);
+    float u2 = tex2D(_HeightMap, i.uv + du);
+    i.normal = float3(u1 - u2, 1, 0);
+
+    float2 dv = float2(0, _HeightMap_TexelSize.y * 0.5);
+    float v1 = tex2D(_HeightMap, i.uv - dv);
+    float v2 = tex2D(_HeightMap, i.uv + dv);
+    i.normal = float3(0, 1, v1 - v2);
+
+    i.normal = normalize(i.normal);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/other-dimension.png)  
+*V 方向的法线*
+
+我们现在可以获取 U 和 V 切线了。这些向量一起描述了片段上高度场的表面。通过计算它们的叉积，我们可以得到 2D 高度场的法向量。
+
+```c
+    float2 du = float2(_HeightMap_TexelSize.x * 0.5, 0);
+    float u1 = tex2D(_HeightMap, i.uv - du);
+    float u2 = tex2D(_HeightMap, i.uv + du);
+    float3 tu = float3(1, u2 - u1, 0);
+
+    float2 dv = float2(0, _HeightMap_TexelSize.y * 0.5);
+    float v1 = tex2D(_HeightMap, i.uv - dv);
+    float v2 = tex2D(_HeightMap, i.uv + dv);
+    float3 tv = float3(0, v2 - v1, 1);
+
+    i.normal = cross(tv, tu);
+    i.normal = normalize(i.normal);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/normals.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/normals-details.png)  
+*完整的法线*  
+
+> **叉积是个啥？**
+> (略略略)
+
+计算切向量的叉积，可以得到 $\begin{bmatrix}0 \\\\ f_{v}^{'} \\\\ 1 \end{bmatrix} × \begin{bmatrix}0 \\\\ f_{u}^{'} \\\\ 1 \end{bmatrix} = \begin{bmatrix}-f_{u}^{'} \\\\ 1 \\\\ -f_{v}^{'} \end{bmatrix}$. 所以我们可以直接构造法向量，而不需要依赖 cross 函数。
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+    float2 du = float2(_HeightMap_TexelSize.x * 0.5, 0);
+    float u1 = tex2D(_HeightMap, i.uv - du);
+    float u2 = tex2D(_HeightMap, i.uv + du);
+//  float3 tu = float3(1, u2 - u1, 0);
+
+    float2 dv = float2(0, _HeightMap_TexelSize.y * 0.5);
+    float v1 = tex2D(_HeightMap, i.uv - dv);
+    float v2 = tex2D(_HeightMap, i.uv + dv);
+//  float3 tv = float3(0, v2 - v1, 1);
+
+//  i.normal = cross(tv, tu);
+    i.normal = float3(u1 - u2, 1, v1 - v2);
+    i.normal = normalize(i.normal);
+}
+```
+
+[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-mapping/bump-mapping.unitypackage)
+
+# 2 法线贴图
 
