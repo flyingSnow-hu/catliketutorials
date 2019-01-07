@@ -284,7 +284,77 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 # 2 法线贴图
 
+凹凸贴图运行时，我们必须执行多次纹理采样和有限差分计算。这似乎是一种浪费，因为法线应该是始终相同的。 为什么要每一帧做重复工作？我们可以只做一次并将法线存储在纹理中。
 
+> 那么纹理过滤还有效么？
+> 双线性和三线性过滤将在法线向量之间进行混合，就像法线在三角形之间插值一样。所以我们必须把采样的法线重新归一化。
+>  
+> 您还必须确保每个 mipmap 包含法线是有效的。不能简单地像颜色数据一样对纹理进行向下采样。得到的向量也必须归一化。这一点 Unity 会保证。
+
+这意味着我们需要一个法线贴图。我可以提供一个，但也可以让 Unity 为我们做一个。将高度贴图的 纹理类型更改为*Normal Map*，Unity会自动切换纹理使用三线性过滤，并假设我们要使用灰度图像数据来生成法线贴图。这正是我们想要的，但请将 Bumpiness 更改为更低的值，如0.05。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/inspector.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/preview.png)  
+*从高度图生成法线*  
+
+应用导入设置后，Unity 将计算出法线贴图。原始的高度贴图仍然存在，但 Unity 内部会使用生成的贴图。
+
+如同我们将法线可视化为颜色时一样，法线的分量必须调整到 0-1 范围内。所以它们实际存放的是 $\frac{N+1}{2}$。也就是说，比较平的地方会显示为绿色，然而法线贴图看起来是蓝色的，这是因为法线贴图常见的一个约定是将向上方向存储在 Z 分量中。从 Unity 的角度来看，Y 和 Z 坐标互相交换了。
+
+## 2.1 采样法线贴图
+
+法线贴图和高度贴图非常不同，所以我们先正一下名字。
+
+```c
+    Properties {
+        _Tint ("Tint", Color) = (1, 1, 1, 1)
+        _MainTex ("Albedo", 2D) = "white" {}
+        [NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+//      [NoScaleOffset] _HeightMap ("Heights", 2D) = "gray" {}
+        [Gamma] _Metallic ("Metallic", Range(0, 1)) = 0
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.1
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/material-with-normal-map.png)  
+*改成法线贴图*  
+
+我们可以删掉所有有关高度贴图的代码，然后换成一次采样加一次归一化。
+
+```c
+sampler2D _NormalMap;
+
+//sampler2D _HeightMap;
+//float4 _HeightMap_TexelSize;
+
+…
+
+void InitializeFragmentNormal(inout Interpolators i) {
+    i.normal = tex2D(_NormalMap, i.uv).rgb;
+    i.normal = normalize(i.normal);
+}
+```
+
+当然，我们还要把法线转回原始的 [-1, 1] 区间: 计算 $2N-1$.
+
+```c
+    i.normal = tex2D(_NormalMap, i.uv).xyz * 2 - 1;
+```
+
+别忘了交换 Y 和 Z
+
+```c
+    i.normal = tex2D(_NormalMap, i.uv).xyz * 2 - 1;
+    i.normal = i.normal.xzy;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/normals.png)  
+*使用法线贴图*  
+
+## 2.2 DXT5nm
+
+
+---
   
 下一课是[影子](https://catlikecoding.com/unity/tutorials/rendering/part-7/)。  
 [unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangents.unitypackage)
