@@ -214,7 +214,7 @@ float FadeShadows (Interpolators i, float attenuation) {
 }
 ```
 
-> UnitySampleBakedOcclusion 都做了什么？
+> **UnitySampleBakedOcclusion 都做了什么？**  
 > 它使用光照贴图坐标对阴影遮罩进行采样，然后选择适当的通道。 unity_OcclusionMaskSelector 变量是一个向量，其中的某个分量被设置为1，与当前被着色的光源匹配。
 ```c
 fixed UnitySampleBakedOcclusion (float2 lightmapUV, float3 worldPos) {

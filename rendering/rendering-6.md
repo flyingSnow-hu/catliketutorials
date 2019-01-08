@@ -353,6 +353,46 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 ## 2.2 DXT5nm
 
+我们的法线肯定有问题。那是因为 Unity 最终编码法线的方式和我们预想的不一样。虽然纹理预览显示的是 RGB 编码，但 Unity 实际上使用的是 DXT5nm。
+
+DXT5nm 格式仅存储法线的 X 和 Y 分量。 其 Z 分量被丢弃。 Y 分量如预想的一样存储在G通道中。然而 X 分量存储在 A 通道中。R 和 B 通道不使用。
+
+> **为什么要这样存储 X 和 Y 分量呢？**
+> 
+> 四通道纹理仅使用两个通道似乎很浪费。如果使用的是未压缩的纹理，确实如此。然而 DXT5nm 格式的设计意图是与 DXT5 纹理压缩一起使用。Unity默认执行此操作。
+> 
+> DXT5 通过对 4×4 像素的块进行分组，并用两种颜色和查找表来近似压缩像素。用于颜色的位数因通道而异。R 和 B 各 5 位，G 得 6 位，而 A 得 8 位。这就是把 X 坐标存放到 A 通道的原因之一。另一个原因是 RGB 通道共用一个查找表，A 单独占用一个查找表。这样一套设计可以把 X 和 Y 分量隔离开。
+> 
+> 压缩是有损的，但对于法线贴图其程度是可接受的。与未压缩的 8 位 RGB 纹理相比，可以获得 3：1 的压缩比。
+> 
+> 无论您是否实际压缩它们，Unity 都会使用 DXT5nm 格式编码所有法线​​贴图。但是，在移动平台上并非如此，因为它们不支持 DXT5。这时 Unity 将使用常规 RGB 编码。
+
+所以由于 DXT5nm 格式，我们只能获得法线的前两个分量。
+
+```c
+    i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
+```
+
+第三个分量需要根据前两个分量推断出来。由于法线都是单位向量，$||N||=||N||^{2}=N_{x}^{2}+N_{y}^{2}+N_{z}^{2}=1$，所以$N_{z}=\sqrt{1-N_{x}^{2}-N_{y}^{2}}$.
+
+```c
+    i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
+    i.normal.z = sqrt(1 - dot(i.normal.xy, i.normal.xy));
+    i.normal = i.normal.xzy;
+```
+
+理论上说，其结果应该等于原始 Z 分量。但是由于纹理的精度有限，再加上纹理过滤，结果通常会有所不同。但也足够接近了。
+
+此外，由于精度限制，$N_{x}^{2}+N_{y}^{2}$可能超出界限。 通过限制点积来确保这种情况不会发生。
+
+```c
+    i.normal.z = sqrt(1 - saturate(dot(i.normal.xy, i.normal.xy)));
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/dxt5nm.png)  
+*解码 DXT5nm 法线*
+
+  
 
 ---
   
