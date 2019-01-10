@@ -392,7 +392,95 @@ DXT5nm 格式仅存储法线的 X 和 Y 分量。 其 Z 分量被丢弃。 Y 分
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/dxt5nm.png)  
 *解码 DXT5nm 法线*
 
-  
+## 2.3 缩放凹凸
+
+既然我们已经将法线烘焙到纹理中，所以我们就不能在片段着色器中缩放它们了——真的是这样吗？
+
+我们可以在计算 Z 之前缩放法线的X和Y分量。如果我们减小 X 和 Y，那么 Z 将变大，从而产生更平坦的表面。 如果增加 X 和 Y 则相反。 所以可以通过这种方式调整凹凸。 由于我们已经对 X 和 Y 的平方加了限制，所以永远不会得到无效的法线。
+
+让我们为着色器添加一个凹凸缩放属性，如同 Unity 的标准着色器一样。
+
+```c
+    Properties {
+        _Tint ("Tint", Color) = (1, 1, 1, 1)
+        _MainTex ("Albedo", 2D) = "white" {}
+        [NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+        _BumpScale ("Bump Scale", Float) = 1
+        [Gamma] _Metallic ("Metallic", Range(0, 1)) = 0
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.1
+    }
+```
+
+将这个比例系数纳入计算。
+
+```c
+sampler2D _NormalMap;
+float _BumpScale;
+
+…
+
+void InitializeFragmentNormal(inout Interpolators i) {
+    i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
+    i.normal.xy *= _BumpScale;
+    i.normal.z = sqrt(1 - saturate(dot(i.normal.xy, i.normal.xy)));
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+```
+
+为了与使用高度图时的强度大致相同，将比例缩小到 0.25。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/bump-scale.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/scaled.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/scaled-details.png)  
+*缩放过的凹凸*   
+
+UnityStandardUtils 包含了 UnpackScaleNormal 函数。它会自动对法线贴图正确解码，并进行缩放。所以让我们利用这个方便的函数吧。
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+//  i.normal.xy = tex2D(_NormalMap, i.uv).wy * 2 - 1;
+//  i.normal.xy *= _BumpScale;
+//  i.normal.z = sqrt(1 - saturate(dot(i.normal.xy, i.normal.xy)));
+    i.normal = UnpackScaleNormal(tex2D(_NormalMap, i.uv), _BumpScale);
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+```
+
+> **UnpackScaleNormal 是什么样子的？**
+
+> Unity 针对不支持 DXT5nm 的平台定义了 UNITY_NO_DXT5nm 关键字。此时该函数切换到RGB格式，不支持法线缩放。 由于指令限制，它在 Shader Model 2 环境下也不支持缩放。因此，在移动平台时不要依赖于凹凸缩放。
+>
+>    half3 UnpackScaleNormal (half4 packednormal, half bumpScale) {
+>        #if defined(UNITY_NO_DXT5nm)
+>            return packednormal.xyz * 2 - 1;
+>        #else
+>            half3 normal;
+>            normal.xy = (packednormal.wy * 2 - 1);
+>            #if (SHADER_TARGET >= 30)
+>                // SM2.0: instruction count limitation
+>                // SM2.0: normal scaler is not supported
+>                normal.xy *= bumpScale;
+>            #endif
+>            normal.z = sqrt(1.0 - saturate(dot(normal.xy, normal.xy)));
+>            return normal;
+>        #endif
+>    }
+
+## 2.4 把反照率和凹凸合起来
+
+现在我们的法线贴图功能完成了，可以检查效果了。当只使用大理石反照率贴图时，我们的四边形看起来像完美抛光的石头。给他加上法线贴图，它会变成一个更有意思的表面。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/without-bumps.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/with-bumps.png)  
+*没有法线和有法线的对比*
+
+[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/normal-mapping.unitypackage)
+
+# 3 凹凸的细节
+
+
 
 ---
   
