@@ -452,21 +452,24 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 > Unity 针对不支持 DXT5nm 的平台定义了 UNITY_NO_DXT5nm 关键字。此时该函数切换到RGB格式，不支持法线缩放。 由于指令限制，它在 Shader Model 2 环境下也不支持缩放。因此，在移动平台时不要依赖于凹凸缩放。
 >
->    half3 UnpackScaleNormal (half4 packednormal, half bumpScale) {
->        #if defined(UNITY_NO_DXT5nm)
->            return packednormal.xyz * 2 - 1;
->        #else
->            half3 normal;
->            normal.xy = (packednormal.wy * 2 - 1);
->            #if (SHADER_TARGET >= 30)
->                // SM2.0: instruction count limitation
->                // SM2.0: normal scaler is not supported
->                normal.xy *= bumpScale;
->            #endif
->            normal.z = sqrt(1.0 - saturate(dot(normal.xy, normal.xy)));
->            return normal;
->        #endif
->    }
+```c
+    half3 UnpackScaleNormal (half4 packednormal, half bumpScale) {
+        #if defined(UNITY_NO_DXT5nm)
+            return packednormal.xyz * 2 - 1;
+        #else
+            half3 normal;
+            normal.xy = (packednormal.wy * 2 - 1);
+            #if (SHADER_TARGET >= 30)
+                // SM2.0: instruction count limitation
+                // SM2.0: normal scaler is not supported
+                normal.xy *= bumpScale;
+            #endif
+            normal.z = sqrt(1.0 - saturate(dot(normal.xy, normal.xy)));
+            return normal;
+        #endif
+    }
+
+```
 
 ## 2.4 把反照率和凹凸合起来
 
@@ -478,8 +481,215 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 [unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/normal-mapping/normal-mapping.unitypackage)
 
+
 # 3 凹凸的细节
 
+在第三节“合并纹理”中，我们创建了一个带有细节纹理的着色器。我们为反照率做了细节贴图，现在也可以为凹凸也做一个。首先，还是要为 My First Lighting 添加对反照率细节的支持。
+
+```c
+    Properties {
+        _Tint ("Tint", Color) = (1, 1, 1, 1)
+        _MainTex ("Albedo", 2D) = "white" {}
+        [NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+        _BumpScale ("Bump Scale", Float) = 1
+        [Gamma] _Metallic ("Metallic", Range(0, 1)) = 0
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.1
+        _DetailTex ("Detail Texture", 2D) = "gray" {}
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/detail-inspector.png)  
+*加上反照率细节贴图*
+
+我们不为细节 UV 单独添加插值器，而是在单个插值器中手动打包主 UV 和细节 UV。主 UV 放入 XY，细节 UV 放入 ZW。  
+
+```c
+struct Interpolators {
+    float4 position : SV_POSITION;
+//  float2 uv : TEXCOORD0;
+    float4 uv : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+    float3 worldPos : TEXCOORD2;
+
+    #if defined(VERTEXLIGHT_ON)
+        float3 vertexLightColor : TEXCOORD3;
+    #endif
+};
+```
+
+添加所需的变量并在顶点代码中填充插值器。
+
+```c
+sampler2D _MainTex, _DetailTex;
+sampler2D _MainTex, _DetailTex;
+float4 _MainTex_ST, _DetailTex_ST;
+
+…
+
+Interpolators MyVertexProgram (VertexData v) {
+    Interpolators i;
+    i.position = mul(UNITY_MATRIX_MVP, v.position);
+    i.worldPos = mul(unity_ObjectToWorld, v.position);
+    i.normal = UnityObjectToWorldNormal(v.normal);
+    i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
+    i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
+    ComputeVertexLightColor(i);
+    return i;
+}
+```
+
+现在当需要主 UV 时我们应该使用 i.uv.xy 而不是 i.uv。
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+    i.normal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+
+float4 MyFragmentProgram (Interpolators i) : SV_TARGET {
+    InitializeFragmentNormal(i);
+
+    float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
+
+    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Tint.rgb;
+
+    …
+}
+```
+
+把细节纹理和反照率相乘。
+
+```c
+    float3 albedo = tex2D(_MainTex, i.uv.xy).rgb * _Tint.rgb;
+    albedo *= tex2D(_DetailTex, i.uv.zw) * unity_ColorSpaceDouble;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/without-bumps.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/with-bumps.png)  
+*加了细节的反照率，不带法线和带有法线*  
+
+## 3.1 法线细节
+
+既然我们的大理石材质的细节纹理是灰度图，我们可以使用它来生成法线贴图。复制它并将其导入类型更改为法线贴图。将其凹凸减少到 0.1 之类，并保留所有其他设置。
+
+当 mipmap 淡出时，颜色渐渐变为灰色。结果就是 Unity 生成的法线细节贴图逐渐变平。最后它们一起淡出。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/detail-normals-inspector.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/detail-normals-preview.png)  
+*法线细节纹理*  
+
+将法线细节贴图的属性添加到着色器。给它一个凹凸缩放。
+
+```c
+    Properties {
+        _Tint ("Tint", Color) = (1, 1, 1, 1)
+        _MainTex ("Albedo", 2D) = "white" {}
+        [NoScaleOffset] _NormalMap ("Normals", 2D) = "bump" {}
+        _BumpScale ("Bump Scale", Float) = 1
+        [Gamma] _Metallic ("Metallic", Range(0, 1)) = 0
+        _Smoothness ("Smoothness", Range(0, 1)) = 0.1
+        _DetailTex ("Detail Texture", 2D) = "gray" {}
+        [NoScaleOffset] _DetailNormalMap ("Detail Normals", 2D) = "bump" {}
+        _DetailBumpScale ("Detail Bump Scale", Float) = 1
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/detail-bumps-inspector.png)  
+*法线细节贴图和缩放*  
+
+添加所需的变量并获取法线细节贴图，如同主法线贴图一样。在我们动手合并之前，暂时只显示细节法线。
+
+```c
+sampler2D _NormalMap, _DetailNormalMap;
+float _BumpScale, _DetailBumpScale;
+
+…
+
+void InitializeFragmentNormal(inout Interpolators i) {
+    i.normal = UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    i.normal =
+        UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/detail-normals.png)  
+*凹凸细节*
+
+## 3.2 混合法线
+
+为了合并，我们将主反照率和细节反照率相乘。 法线不能这样做，因为它们是矢量。 但我们可以对它们求平均，在归一化之前。
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+    float3 mainNormal =
+        UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    float3 detailNormal =
+        UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    i.normal = (mainNormal + detailNormal) * 0.5;
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/averaged-normals.png)  
+*平均化的法线*
+
+结果不是很好。 主凹凸和细节凹凸都变平了。理想情况下，如果其中之一是平的，它就不应该影响另一个。
+
+我们在这里试图做的是合并两个高度场。平均没有意义。叠加它们更有意义。当两个高度函数叠加时，它们的斜率——也就是它们的导数——也被叠加。我们可以从法线中提取导数吗？
+
+之前，我们构造法线的时候，是通过归一化$\begin{bmatrix}-f_{u}^{'} \\\\ 1 \\\\ -f_{v}^{'} \end{bmatrix}$. 我们的贴图中的法线都是这个形式，除了 Y 和 Z 分量交换了位置，即$\begin{bmatrix}-f_{u}^{'} \\\\ -f_{v}^{'} \\\\ 1 \end{bmatrix}$。但是实际上的法线是经过归一化的，也就是$\begin{bmatrix}-sf_{u}^{'}  \\\\ -sf_{v}^{'} \\\\ s\end{bmatrix}$，其中 s 为任意的缩放因子。这样一来，Z 分量就恰好等于这个因子，用 X 和 Y 分别除以 Z 就可以得到偏导数。只有一种情况除外——Z 等于零，也就是一个完全垂直的斜率。但是我们的凹凸远没有那么陡峭，所以不需要担心。
+
+既然我们有了导数，就可以把导数求和以得到合并高度场的导数，然后再反求法向量。归一化之前的法向量是$\begin{bmatrix}\frac{M_{x}}{M_{z}}+\frac{D_{x}}{D_{z}} \\ \frac{M_{y}}{M_{z}}+\frac{D_{y}}{D_{z}} \\ 1 \end{bmatrix}$.
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+    float3 mainNormal =
+        UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    float3 detailNormal =
+        UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    i.normal =
+        float3(mainNormal.xy / mainNormal.z + detailNormal.xy / detailNormal.z, 1);
+    i.normal = i.normal.xzy;
+    i.normal = normalize(i.normal);
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/added-derivatives.png)  
+*导数相加*
+
+这样看起来好多了！对于基本是平的法线贴图，合并的效果很好。但是叠加比较陡的斜率还是会损失细节。一个略微有改进的方法称为 whiteout 混合。首先把新法线乘以$M_{z}D_{z}$. 这样毫无问题因为之后还会归一化。我们由此得到$\begin{bmatrix}M_{x}D_{z}+D_{x}M_{z} \\ M_{y}D_{z}+D_{y}M_{z} \\ M_{z}D_{z} \end{bmatrix}$. 再去掉 X 和 Y 的缩放，得到$\begin{bmatrix}M_{x}+D_{x} \\ M_{y}+D_{y} \\ M_{z}D_{z} \end{bmatrix}$.
+
+这种调整夸大了 X 和 Y 分量，因此在陡坡会产生更明显的凹凸。但优点是当其中一个法线持平时，另一个法线不会改变。
+
+> **这种方法为何叫 whiteout 混合？**
+> 这种方法首先由 Christopher Oat 在 SIGGRAPH'07 公开提出。它被用在 AMD 的 Ruby：Whiteout 演示中，因此得名。
+
+```c
+    i.normal =
+        float3(mainNormal.xy + detailNormal.xy, mainNormal.z * detailNormal.z);
+//      float3(mainNormal.xy / mainNormal.z + detailNormal.xy / detailNormal.z, 1);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/mixed-normals.png)  
+*Whiteout 算法混合的法线，加上反照率贴图*
+
+UnityStandardUtils 包含了 BlendNormals 函数，该函数也使用 whiteout 混合。我们就用它吧。它还把结果归一化了，因此我们不必再自己做了。
+
+> **BlendNormals 方法长什么样子？**
+> 它做的事就是我们之前做的。
+```c
+half3 BlendNormals (half3 n1, half3 n2) {
+    return normalize(half3(n1.xy + n2.xy, n1.z * n2.z));
+}
+```
+
+[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/bump-details.unitypackage)
+
+# 4 切线空间
 
 
 ---
