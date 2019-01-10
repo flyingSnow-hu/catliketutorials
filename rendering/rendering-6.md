@@ -643,7 +643,7 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 之前，我们构造法线的时候，是通过归一化$\begin{bmatrix}-f_{u}^{'} \\\\ 1 \\\\ -f_{v}^{'} \end{bmatrix}$. 我们的贴图中的法线都是这个形式，除了 Y 和 Z 分量交换了位置，即$\begin{bmatrix}-f_{u}^{'} \\\\ -f_{v}^{'} \\\\ 1 \end{bmatrix}$。但是实际上的法线是经过归一化的，也就是$\begin{bmatrix}-sf_{u}^{'}  \\\\ -sf_{v}^{'} \\\\ s\end{bmatrix}$，其中 s 为任意的缩放因子。这样一来，Z 分量就恰好等于这个因子，用 X 和 Y 分别除以 Z 就可以得到偏导数。只有一种情况除外——Z 等于零，也就是一个完全垂直的斜率。但是我们的凹凸远没有那么陡峭，所以不需要担心。
 
-既然我们有了导数，就可以把导数求和以得到合并高度场的导数，然后再反求法向量。归一化之前的法向量是$\begin{bmatrix}\frac{M_{x}}{M_{z}}+\frac{D_{x}}{D_{z}} \\ \frac{M_{y}}{M_{z}}+\frac{D_{y}}{D_{z}} \\ 1 \end{bmatrix}$.
+既然我们有了导数，就可以把导数求和以得到合并高度场的导数，然后再反求法向量。归一化之前的法向量是$\begin{bmatrix}\frac{M_{x}}{M_{z}}+\frac{D_{x}}{D_{z}} \\\\ \frac{M_{y}}{M_{z}}+\frac{D_{y}}{D_{z}} \\\\ 1 \end{bmatrix}$.
 
 ```c
 void InitializeFragmentNormal(inout Interpolators i) {
@@ -661,11 +661,11 @@ void InitializeFragmentNormal(inout Interpolators i) {
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-6/bump-details/added-derivatives.png)  
 *导数相加*
 
-这样看起来好多了！对于基本是平的法线贴图，合并的效果很好。但是叠加比较陡的斜率还是会损失细节。一个略微有改进的方法称为 whiteout 混合。首先把新法线乘以$M_{z}D_{z}$. 这样毫无问题因为之后还会归一化。我们由此得到$\begin{bmatrix}M_{x}D_{z}+D_{x}M_{z} \\ M_{y}D_{z}+D_{y}M_{z} \\ M_{z}D_{z} \end{bmatrix}$. 再去掉 X 和 Y 的缩放，得到$\begin{bmatrix}M_{x}+D_{x} \\ M_{y}+D_{y} \\ M_{z}D_{z} \end{bmatrix}$.
+这样看起来好多了！对于基本是平的法线贴图，合并的效果很好。但是叠加比较陡的斜率还是会损失细节。一个略微有改进的方法称为 whiteout 混合。首先把新法线乘以$M_{z}D_{z}$. 这样毫无问题因为之后还会归一化。我们由此得到$\begin{bmatrix}M_{x}D_{z}+D_{x}M_{z} \\\\ M_{y}D_{z}+D_{y}M_{z} \\\\ M_{z}D_{z} \end{bmatrix}$. 再去掉 X 和 Y 的缩放，得到$\begin{bmatrix}M_{x}+D_{x} \\\\ M_{y}+D_{y} \\\\ M_{z}D_{z} \end{bmatrix}$.
 
 这种调整夸大了 X 和 Y 分量，因此在陡坡会产生更明显的凹凸。但优点是当其中一个法线持平时，另一个法线不会改变。
 
-> **这种方法为何叫 whiteout 混合？**
+> **这种方法为何叫 whiteout 混合？**  
 > 这种方法首先由 Christopher Oat 在 SIGGRAPH'07 公开提出。它被用在 AMD 的 Ruby：Whiteout 演示中，因此得名。
 
 ```c
@@ -679,7 +679,7 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 UnityStandardUtils 包含了 BlendNormals 函数，该函数也使用 whiteout 混合。我们就用它吧。它还把结果归一化了，因此我们不必再自己做了。
 
-> **BlendNormals 方法长什么样子？**
+> **BlendNormals 方法长什么样子？**  
 > 它做的事就是我们之前做的。
 ```c
 half3 BlendNormals (half3 n1, half3 n2) {
