@@ -1104,28 +1104,28 @@ void InitializeFragmentNormal(inout Interpolators i) {
 
 从编译过的着色器代码中可以看出区别，比如这是 D3D11 所使用的插值器，没有定义 BINORMAL_PER_FRAGMENT。
 
-> // Output signature:
-> //
-> // Name                 Index   Mask Register SysValue  Format   Used
-> // -------------------- ----- ------ -------- -------- ------- ------
-> // SV_POSITION              0   xyzw        0      POS   float   xyzw
-> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw
-> // TEXCOORD                 1   xyz         2     NONE   float   xyz 
-> // TEXCOORD                 2   xyz         3     NONE   float   xyz 
-> // TEXCOORD                 3   xyz         4     NONE   float   xyz 
-> // TEXCOORD                 4   xyz         5     NONE   float   xyz 
+> // Output signature:  
+> //  
+> // Name                 Index   Mask Register SysValue  Format   Used  
+> // -------------------- ----- ------ -------- -------- ------- ------  
+> // SV_POSITION              0   xyzw        0      POS   float   xyzw  
+> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw  
+> // TEXCOORD                 1   xyz         2     NONE   float   xyz   
+> // TEXCOORD                 2   xyz         3     NONE   float   xyz   
+> // TEXCOORD                 3   xyz         4     NONE   float   xyz   
+> // TEXCOORD                 4   xyz         5     NONE   float   xyz   
 
 下面是定义了 BINORMAL_PER_FRAGMENT 的：
 
-> // Output signature:
-> //
-> // Name                 Index   Mask Register SysValue  Format   Used
-> // -------------------- ----- ------ -------- -------- ------- ------
-> // SV_POSITION              0   xyzw        0      POS   float   xyzw
-> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw
-> // TEXCOORD                 1   xyz         2     NONE   float   xyz 
-> // TEXCOORD                 2   xyzw        3     NONE   float   xyzw
-> // TEXCOORD                 4   xyz         4     NONE   float   xyz 
+> // Output signature:  
+> //  
+> // Name                 Index   Mask Register SysValue  Format   Used  
+> // -------------------- ----- ------ -------- -------- ------- ------  
+> // SV_POSITION              0   xyzw        0      POS   float   xyzw  
+> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw  
+> // TEXCOORD                 1   xyz         2     NONE   float   xyz   
+> // TEXCOORD                 2   xyzw        3     NONE   float   xyzw  
+> // TEXCOORD                 4   xyz         4     NONE   float   xyz   
 
 ---
   
