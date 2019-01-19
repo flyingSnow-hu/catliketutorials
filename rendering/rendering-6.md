@@ -715,7 +715,417 @@ half3 BlendNormals (half3 n1, half3 n2) {
 
 ## 4.1 把切线空间描出来
 
+为了了解切线空间的工作原理，让我们编写一套快速将切线空间可视化的代码。创建一个名为 TangentSpaceVisualizer 的组件，为其添加 OnDrawGizmos 方法。
 
+```c
+using UnityEngine;
+
+public class TangentSpaceVisualizer : MonoBehaviour {
+
+    void OnDrawGizmos () {
+    }
+}
+```
+
+每次触发 OnDrawGizmos 时，从物体的 Mesh Filter 中抓取网格，并用它来显示其切线空间。当然，这仅在网格存在时才有效。要抓取 shadedMesh，而不是 mesh。前者会直接引用网格资源，后者会创建一份副本。
+
+> **为什么 MeshFilter.mesh 会创建一份副本？**  
+> 假设有一个使用网格资源的物体，你想在运行时调整该物体的网格。这时你需要为该网格资源创建一个本地副本而非直接修改资源。因此 MeshFilter.mesh 会创建副本。
+
+```c
+    void OnDrawGizmos () {
+        MeshFilter filter = GetComponent<MeshFilter>();
+        if (filter) {
+            Mesh mesh = filter.sharedMesh;
+            if (mesh) {
+                ShowTangentSpace(mesh);
+            }
+        }
+    }
+
+    void ShowTangentSpace (Mesh mesh) {
+    }
+```
+
+首先我们要显示的是法线向量。从网格中获取顶点位置和法线，并以此绘制线段。我们必须将其转换为世界空间，以便在场景中匹配几何体。由于法线对应于切线空间中的向上方向，我们用绿色绘制。
+
+```c
+    void ShowTangentSpace (Mesh mesh) {
+        Vector3[] vertices = mesh.vertices;
+        Vector3[] normals = mesh.normals;
+        for (int i = 0; i < vertices.Length; i++) {
+            ShowTangentSpace(
+                transform.TransformPoint(vertices[i]),
+                transform.TransformDirection(normals[i])
+            );
+        }
+    }
+
+    void ShowTangentSpace (Vector3 vertex, Vector3 normal) {
+        Gizmos.color = Color.green;
+        Gizmos.DrawLine(vertex, vertex + normal);
+    }
+```
+
+> **每一帧取一遍网格数据是不是效率不够好？**  
+> 是的。不过既然我们是快速可视化，我们就不纠结于这里的性能优化吧。
+
+把这个组件挂到带有网格的物体上，查看其顶点法线。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/gizmos-normal.png)  
+*显示法线*
+
+线段的合理长度是多少？这取决于物体形状。所以我们添加一个可配置的比例系数。我们还要支持一个偏移配置，它将线段推离表面，这样可以更轻松地检查重叠的顶点。
+
+```c
+    public float offset = 0.01f;
+    public float scale = 0.1f;
+
+    void ShowTangentSpace (Vector3 vertex, Vector3 normal) {
+        vertex += normal * offset;
+        Gizmos.color = Color.green;
+        Gizmos.DrawLine(vertex, vertex + normal * scale);
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/inspector.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/gizmos-offset-scale.png)  
+*偏移和缩放*
+
+下一步是切向量。虽然它们是 4 维矢量，用法就和普通矢量一样。切线指向切线空间的右侧，所以用红色绘制。
+
+```c
+    void ShowTangentSpace (Mesh mesh) {
+        Vector3[] vertices = mesh.vertices;
+        Vector3[] normals = mesh.normals;
+        Vector4[] tangents = mesh.tangents;
+        for (int i = 0; i < vertices.Length; i++) {
+            ShowTangentSpace(
+                transform.TransformPoint(vertices[i]),
+                transform.TransformDirection(normals[i]),
+                transform.TransformDirection(tangents[i])
+            );
+        }
+    }
+
+    void ShowTangentSpace (Vector3 vertex, Vector3 normal, Vector3 tangent) {
+        vertex += normal * offset;
+        Gizmos.color = Color.green;
+        Gizmos.DrawLine(vertex, vertex + normal * scale);
+        Gizmos.color = Color.red;
+        Gizmos.DrawLine(vertex, vertex + tangent * scale);
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/gizmos-tangents.png)  
+*显示法线和切线*
+
+最后用蓝色绘制副法线。
+
+```c
+    void ShowTangentSpace (Mesh mesh) {
+        …
+        for (int i = 0; i < vertices.Length; i++) {
+            ShowTangentSpace(
+                transform.TransformPoint(vertices[i]),
+                transform.TransformDirection(normals[i]),
+                transform.TransformDirection(tangents[i]),
+                tangents[i].w
+            );
+        }
+    }
+
+    void ShowTangentSpace (
+        Vector3 vertex, Vector3 normal, Vector3 tangent, float binormalSign
+    ) {
+        …
+        Vector3 binormal = Vector3.Cross(normal, tangent) * binormalSign;
+        Gizmos.color = Color.blue;
+        Gizmos.DrawLine(vertex, vertex + binormal * scale);
+    }
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/gizmos-binormal.png)  
+*显示完整的切线空间*
+
+可以看到，在默认的立方体上，切线空间在面和面之间不同，但在面的内部各顶点是一致的。在球体上，切线空间在每一个顶点都不一致，结果就是切线空间在三角形上要进行插值，形成曲面。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/sphere-tangent-space.png)  
+*默认球体周围的切线空间*
+
+在球体周围围绕切线空间是有问题的。Unity 的默认球体使用经纬度纹理布局。这就像在球上缠绕一张纸，形成一个圆筒。然后再把圆筒的顶部和底部弄皱，使它们与球体匹配。因此球体的两极非常混乱。而 Unity 的默认球体的顶点布局是立方体式的，这更加重了问题。它们适用于快速原型，但不要指望默认网格能够产生高质量的结果。
+
+## 4.2 着色器里的切线空间
+
+要在着色器里获取切线，我们需要把它加入 VertexData 结构体。
+
+```c
+struct VertexData {
+    float4 position : POSITION;
+    float3 normal : NORMAL;
+    float4 tangent : TANGENT;
+    float2 uv : TEXCOORD0;
+};
+```
+
+插值器里也必须包含它们。插值器的顺序无关紧要，但我喜欢将法线和切线放在一起。
+
+```c
+struct Interpolators {
+    float4 position : SV_POSITION;
+    float4 uv : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+    float4 tangent : TEXCOORD2;
+    float3 worldPos : TEXCOORD3;
+
+    #if defined(VERTEXLIGHT_ON)
+        float3 vertexLightColor : TEXCOORD4;
+    #endif
+};
+```
+
+在顶点代码里将切线变换到世界空间，使用 UnityCG 中的 UnityObjectToWorldDir 函数。当然这个变换只对切线的 XYZ 分量有效，其 W 分量需要原样传入插值器。
+
+```c
+Interpolators MyVertexProgram (VertexData v) {
+    Interpolators i;
+    i.position = mul(UNITY_MATRIX_MVP, v.position);
+    i.worldPos = mul(unity_ObjectToWorld, v.position);
+    i.normal = UnityObjectToWorldNormal(v.normal);
+    i.tangent = float4(UnityObjectToWorldDir(v.tangent.xyz), v.tangent.w);
+    i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
+    i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
+    ComputeVertexLightColor(i);
+    return i;
+}
+```
+
+> **UnityObjectToWorldDir 长什么样子？**  
+> 只是一个简单的方向变换，使用了世界-模型矩阵。
+```c
+// Transforms direction from object to world space
+inline float3 UnityObjectToWorldDir( in float3 dir ) {
+    return normalize(mul((float3x3)unity_ObjectToWorld, dir));
+}
+```
+
+我们现在可以在片段着色器中获取法线和切线了。这样就可以在 InitializeFragmentNormal 函数中构造副法线。但是，我们必须注意一定要用原始的法线，而非凹凸贴图的法线。凹凸贴图的法线存在于切线空间中，请务必区分清楚。
+
+```c
+void InitializeFragmentNormal(inout Interpolators i) {
+    float3 mainNormal =
+        UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    float3 detailNormal =
+        UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    float3 tangentSpaceNormal = BlendNormals(mainNormal, detailNormal);
+    tangentSpaceNormal = tangentSpaceNormal.xzy;
+
+    float3 binormal = cross(i.normal, i.tangent.xyz) * i.tangent.w;
+}
+```
+
+> **法线和切线不需要归一化么？**  
+> 如果我们想确保使用的是单位向量，那么确实应该这样做。实际上，如果要创建正确的 3D 空间，我们还应该确保法线和切线之间的角度为 90°。
+> 
+> 但是，我们不打算在这纠结。原因在下一节说明。
+
+现在我们可以把贴图中获取的法线从切线空间转为世界空间了。
+
+```c
+    float3 binormal = cross(i.normal, i.tangent.xyz) * i.tangent.w;
+
+    i.normal = normalize(
+        tangentSpaceNormal.x * i.tangent +
+        tangentSpaceNormal.y * i.normal +
+        tangentSpaceNormal.z * binormal
+    );
+```
+
+交换 YZ 分量这一步也可以去掉了，和空间转换合并成一步。
+
+```c
+//  tangentSpaceNormal = tangentSpaceNormal.xzy;
+    
+    float3 binormal = cross(i.normal, i.tangent.xyz) * i.tangent.w;
+
+    i.normal = normalize(
+        tangentSpaceNormal.x * i.tangent +
+        tangentSpaceNormal.y * binormal +
+        tangentSpaceNormal.z * i.normal
+    ;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/tangent-to-world.png)  
+*转换过后的法线*
+
+构造副法线时，还有一个额外的细节：假设一个物体的缩放为(-1,1,1)。这意味着它是镜像变换的。在这种情况下，我们必须翻转副法线，以正确地镜像切线空间。实际上，当有奇数个维度为负数时，就必须这样做。UnityShaderVariables 定义了 float4 unity_WorldTransformParams 变量以帮助我们。当我们需要翻转副法线时，它的第四个分量为 -1，否则为 1。
+
+```c
+    float3 binormal = cross(i.normal, i.tangent.xyz) *
+        (i.tangent.w * unity_WorldTransformParams.w);
+```
+
+> **unity_WorldTransformParams 的其他分量是做什么用的？**  
+> 我不知道。至少目前好像没什么用。
+
+## 4.3 同步切线空间
+
+当 3D 艺术家创建细节模型时，通常的方法是构建一个非常高分辨率的模型。所有细节都是实际的 3D 几何体。然后为了能在游戏中使用，生成模型的低分辨率版本。把细节烘焙到此模型的纹理中。
+
+高分辨率模型的法线被烘焙到法线贴图中，此时法线从世界空间转换为切线空间。在游戏中渲染低分辨率模型时，做相反的转换。
+
+只要两个转换使用相同的算法和相同的切线空间，此过程就毫无问题。若非如此，游戏中的渲染结果将是错误的。这样 3D 艺术家会非常痛苦。因此，必须确保法线贴图生成器，Unity的网格导入过程和着色器都已同步。这称为切线空间工作流的同步。
+
+> **法线贴图怎么样？**  
+> 我们法线贴图由高度场生成。因此它们的参考系是平坦的，并且它们的切线空间是规则的。因此，当它们被应用于具有弯曲切线空间的物体时，最终的法线将会失真，和高度场不一致。不过这样也没什么问题，因为大理石的精确外观并不重要。
+
+Unity 从 5.3 开始使用 mikktspace 算法。 因此，请确保在生成法线贴图时也使用 mikktspace。导入网格时，你可以允许 Unity 为您生成切线向量，因为它使用 mikktspace 。或者，自己导出 mikktspace 切线供 Unity 使用。
+
+> **mikktspace 是什么？**  
+> 它是一种生成切线空间和法线的标准，由 Morten Mikkelsen 提出。这个名字是 Mikkelsen's tangent space 的简写。
+> 
+> 对于与 mikktspace 同步的着色器，它必须在顶点程序中接收归一化的法线和切向量。然后对这些矢量进行插值，而不在每个片段重新归一化。通过计算 cross(normal.xyz，tangent.xyz) * tangent.w 得到副法线。这样我们的着色器就与 mikktspace 同步，Unity 的标准着色器也是如此。
+> 
+> 请注意，mikktspace 不保证是正交基，法线和切线之间的角度可以自由变化。只要失真不会太大，这不是问题。因为我们只使用它来转换法线，所以只有一致性是重要的。
+
+使用 mikktspace 时，有一个可选项：副法线可以在片段程序中构建——就像我们一样——或者在顶点程序中构建——就像 Unity 一样。两种方法会产生略微不同的副法线。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-6/tangents/binormal-difference.png)  
+*夸大的副法线的差异*  
+
+因此，在为 Unity 生成法线贴图时，请使用按顶点计算副法线的设置。或者随意并假设它们是按片段计算的，并使用片段计算副法线的着色器。
+
+> **切线空间很麻烦，不用它行吗？**  
+> 由于切线空间环绕物体表面，因此物体的确切形状就不重要了，所以您可以将任何一张切线空间的法线贴图应用于物体。您也可以像我们一样平铺贴图。此外，当网格因动画而变形时，切线空间——以及法线贴图——也会随之变形。
+> 
+> 如果取消切线空间，则必须使用模型空间法线贴图。这些贴图不会粘在表面上，因此不能平铺，不能应用于不同的形状，并且不能与网格一起变形。此外，它们还不适用于纹理压缩。
+> 
+> 所以使用切线空间有着充足的理由。话虽如此，也有一些方法可以处理切线空间法线，而无需明确提供切线向量。这些技术依赖着色器的导数指令，我们将在以后的教程中介绍。但这并不能消除对同步工作流的需求。
+
+## 4.4 按顶点或是按片段求副法线
+
+如果想与 Unity 的标准着色器保持一致，我们必须计算每个顶点的副法线。这样做的好处是不必在片段着色器中计算叉积。缺点是需要一个额外的插值器。
+
+如果您不确定应该使用哪种方法，可以始终支持这两种方法。假设当定义了 BINORMAL_PER_FRAGMENT时，按片段计算副法线，否则按顶点计算。那么在前一种情况下，我们保留 float4 tangent 插值器。在后一种情况下，我们需要两个 float3 插值器。
+
+```c
+struct Interpolators {
+    float4 position : SV_POSITION;
+    float4 uv : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+
+    #if defined(BINORMAL_PER_FRAGMENT)
+        float4 tangent : TEXCOORD2;
+    #else
+        float3 tangent : TEXCOORD2;
+        float3 binormal : TEXCOORD3;
+    #endif
+
+    float3 worldPos : TEXCOORD4;
+
+    #if defined(VERTEXLIGHT_ON)
+        float3 vertexLightColor : TEXCOORD5;
+    #endif
+};
+```
+
+> **我们是跳过了一个插值器吗？**  
+> 我们只在需要一个副法线插值器时使用了 TEXCOORD3。因此，当定义 BINORMAL_PER_FRAGMENT 时，我们跳过了此插值器索引。这样也是允许的，我们可以使用任何想要的插值器索引，只要不超过最大值。
+
+我们将副法线的计算定义成自己的函数，就可以任意在顶点或片段着色器中使用它。
+
+```c
+float3 CreateBinormal (float3 normal, float3 tangent, float binormalSign) {
+    return cross(normal, tangent.xyz) *
+        (binormalSign * unity_WorldTransformParams.w);
+}
+
+Interpolators MyVertexProgram (VertexData v) {
+    Interpolators i;
+    i.position = mul(UNITY_MATRIX_MVP, v.position);
+    i.worldPos = mul(unity_ObjectToWorld, v.position);
+    i.normal = UnityObjectToWorldNormal(v.normal);
+
+    #if defined(BINORMAL_PER_FRAGMENT)
+        i.tangent = float4(UnityObjectToWorldDir(v.tangent.xyz), v.tangent.w);
+    #else
+        i.tangent = UnityObjectToWorldDir(v.tangent.xyz);
+        i.binormal = CreateBinormal(i.normal, i.tangent, v.tangent.w);
+    #endif
+        
+    i.uv.xy = TRANSFORM_TEX(v.uv, _MainTex);
+    i.uv.zw = TRANSFORM_TEX(v.uv, _DetailTex);
+    ComputeVertexLightColor(i);
+    return i;
+}
+
+…
+
+void InitializeFragmentNormal(inout Interpolators i) {
+    float3 mainNormal =
+        UnpackScaleNormal(tex2D(_NormalMap, i.uv.xy), _BumpScale);
+    float3 detailNormal =
+        UnpackScaleNormal(tex2D(_DetailNormalMap, i.uv.zw), _DetailBumpScale);
+    float3 tangentSpaceNormal = BlendNormals(mainNormal, detailNormal);
+
+    #if defined(BINORMAL_PER_FRAGMENT)
+        float3 binormal = CreateBinormal(i.normal, i.tangent.xyz, i.tangent.w);
+    #else
+        float3 binormal = i.binormal;
+    #endif
+    
+    i.normal = normalize(
+        tangentSpaceNormal.x * i.tangent +
+        tangentSpaceNormal.y * binormal +
+        tangentSpaceNormal.z * i.normal
+    );
+}
+```
+
+由于没有定义 BINORMAL_PER_FRAGMENT，我们的着色器现在将按顶点计算副法线。如果要为按片段计算，则必须在某处定义 BINORMAL_PER_FRAGMENT。您可以将它视为库文件的配置选项。因此，在包含 My Lighting 之前，在 My First Lighting Shader 中定义它是有作用的。
+
+因为所有的 pass 应该使用相同的设置，我们必须同时在 base pass 和 additive pass 中定义它。但我们也可以将它放在我们着色器顶部的 CGINCLUDE 块中。该块的内容会包含在所有 CGPROGRAM 块中。
+
+```c
+    Properties {
+        …
+    }
+
+    CGINCLUDE
+
+    #define BINORMAL_PER_FRAGMENT
+
+    ENDCG
+
+    SubShader {
+        …
+    }
+```
+
+从编译过的着色器代码中可以看出区别，比如这是 D3D11 所使用的插值器，没有定义 BINORMAL_PER_FRAGMENT。
+
+> // Output signature:
+> //
+> // Name                 Index   Mask Register SysValue  Format   Used
+> // -------------------- ----- ------ -------- -------- ------- ------
+> // SV_POSITION              0   xyzw        0      POS   float   xyzw
+> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw
+> // TEXCOORD                 1   xyz         2     NONE   float   xyz 
+> // TEXCOORD                 2   xyz         3     NONE   float   xyz 
+> // TEXCOORD                 3   xyz         4     NONE   float   xyz 
+> // TEXCOORD                 4   xyz         5     NONE   float   xyz 
+
+下面是定义了 BINORMAL_PER_FRAGMENT 的：
+
+> // Output signature:
+> //
+> // Name                 Index   Mask Register SysValue  Format   Used
+> // -------------------- ----- ------ -------- -------- ------- ------
+> // SV_POSITION              0   xyzw        0      POS   float   xyzw
+> // TEXCOORD                 0   xyzw        1     NONE   float   xyzw
+> // TEXCOORD                 1   xyz         2     NONE   float   xyz 
+> // TEXCOORD                 2   xyzw        3     NONE   float   xyzw
+> // TEXCOORD                 4   xyz         4     NONE   float   xyz 
 
 ---
   
