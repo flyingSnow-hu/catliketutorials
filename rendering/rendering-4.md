@@ -430,6 +430,81 @@ UnityShaderVariables 定义了一个 float4 \_WorldSpaceLightPos0 变量。它�
 
 # 3 高光着色
 
+除了漫反射，还有一种高光反射。它发生的条件是光在撞击到平面后没有被漫反射，而是直接从表面反弹，反弹的角度等于撞击平面的角度。这种效应导致了你在镜子里看到的反射。
+
+不同于漫反射，在高光反射中观察者的位置很重要。只有反射角度直接朝向你的光才能被看到，其余的都散失到其他地方了，所以没有被你看到。
+
+所以我们需要知道从表面到观察者的方向，所以要知道表面和摄像机的世界坐标。
+
+我们可以在顶点着色器里，通过物体转世界矩阵计算表面的世界坐标，然后传给片段着色器。
+
+```c
+			struct Interpolators {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+				float3 normal : TEXCOORD1;
+				float3 worldPos : TEXCOORD2;
+			};
+
+			Interpolators MyVertexProgram (VertexData v) {
+				Interpolators i;
+				i.position = mul(UNITY_MATRIX_MVP, v.position);
+				i.worldPos = mul(unity_ObjectToWorld, v.position);
+				i.normal = UnityObjectToWorldNormal(v.normal);
+				i.uv = TRANSFORM_TEX(v.uv, _MainTex);
+				return i;
+			}
+```
+
+摄像机的位置可以通过 float3 _WorldSpaceCameraPos 获取，它定义在 UnityShaderVariables 里。我们用它减去表面的位置，然后归一化，得到观察方向。
+
+```c
+			float4 MyFragmentProgram (Interpolators i) : SV_TARGET {
+				i.normal = normalize(i.normal);
+				float3 lightDir = _WorldSpaceLightPos0.xyz;
+				float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
+				
+				float3 lightColor = _LightColor0.rgb;
+				float3 albedo = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;
+				float3 diffuse =
+					albedo * lightColor * DotClamped(lightDir, i.normal);
+				return float4(diffuse, 1);
+			}
+```
+
+> **Unity 的着色器不会对观察方向插值么？**  
+> 会插值，Unity 的着色器在顶点着色器里计算观察方向然后对其插值。在片段着色器里归一化，或者为低端硬件考虑在顶点着色器里归一化。哪个都可以。
+
+## 3.1 反射光
+
+为了知道反射光的角度，我们可以使用 [reflect](http://developer.download.nvidia.com/cg/reflect.html) 函数。它需要的参数是光的入射方向和法线方向，以求出反射方向。所以我们需要把光线方向翻转。
+
+```c
+				float3 reflectionDir = reflect(-lightDir, i.normal);
+
+				return float4(reflectionDir * 0.5 + 0.5, 1);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/reflection-directions.png)  
+*反射方向*
+
+> **反射向量是如何求的？**  
+> 给定入射方向 $D$，法线 $N$，反射方向是 $D-2N(N \cdot D)$.  
+
+对于完美的光滑镜面，我们只能看到角度恰好的一支反射光，其余部分的高光反射由于角度不对，看起来都是黑的。不过物体不会是绝对光滑的，都有微小的凹凸，导致表面法线实际上会有差异。
+
+所以我们可以看到一部分高光反射，即使视角不是那么恰好匹配反射角。我们离反射角越远，看到的就越少。我们可以再一次用限制点积来指出我们能看到多少光。
+
+```c
+				return DotClamped(viewDir, reflectionDir);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/reflections.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/phong.png)  
+*高光反射*
+
+## 3.2 光滑度
+
 
 
 ---
