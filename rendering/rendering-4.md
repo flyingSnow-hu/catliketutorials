@@ -31,7 +31,76 @@
 
 ## 1.1 使用模型的法线
 
+复制我们的第一个着色器，作为我们的第一个光照着色器。用这个着色器新建一个材质，并把它赋给场景上的立方体和球体。让这些物体具有不同的旋转和缩放，其中一些是非统一缩放，让场景复杂一点。
+
+```c
+Shader "Custom/My First Lighting Shader" {
+	…
+}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/normals/objects.png)  
+*一些立方体和球体*  
+
+Unity 的立方体和球体包括了顶点法线，我们可以抓过来然后直接传给片段着色器。
+
+```c
+			struct VertexData {
+				float4 position : POSITION;
+				float3 normal : NORMAL;
+				float2 uv : TEXCOORD0;
+			};
+			
+			struct Interpolators {
+				float4 position : SV_POSITION;
+				float2 uv : TEXCOORD0;
+				float3 normal : TEXCOORD1;
+			};
+
+			Interpolators MyVertexProgram (VertexData v) {
+				Interpolators i;
+				i.uv = TRANSFORM_TEX(v.uv, _MainTex);
+				i.position = mul(UNITY_MATRIX_MVP, v.position);
+				i.normal = v.normal;
+				return i;
+			}
+```
+
+现在我们可以在着色器里把法线显示出来。
+
+```c
+			float4 MyFragmentProgram (Interpolators i) : SV_TARGET {
+				return float4(i.normal * 0.5 + 0.5, 1);
+			}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/normals/batching.png)  
+*把法线向量作为颜色显示*
+
+这些是原始法线，直接从模型取出的。立方体的面看起来是平的，因为每一个面都是独立的四边形，四个顶点的法线都朝向同一方向。相反，球体的顶点法线都指向不同的方向，就会导致平滑的插值。
+
 ## 1.2 动态合批
+
+立方体的法线还有一点比较奇怪。讲道理来说每一个立方体应该显示的是同样的颜色结构，但是现在不是。更奇怪的是，立方体的颜色还会随着观察角度而变化。
+
+![](https://thumbs.gfycat.com/AfraidRashAlbertosaurus-small.gif)  
+*变色的立方体*
+
+这些都是由于动态合批（Dynamic Batching）。Unity 会动态地合并小网格，以减少绘制调用（Draw Call，DC）。球体对于动态合批来说有点大，所以不受影响。立方体就是个不错的目标了。
+
+为了合并网格，物体需要从局部空间变换到世界空间。物体是否参与合并以及如何合并，取决于物体的渲染排序。这个过程也会影响法线，所以我们看到颜色变了。
+
+如果你想的话，可以在 player settings 里关掉动态合批。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/normals/batching-settings.png)  
+*合批设置*
+
+除了动态合批，Unity 还有静态合批。不同之处在于它发生在静态几何体上，不过也同样包括了法线变换到世界空间的步骤。它是在运行时发生的。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/normals/no-batching.png)  
+*没有动态合批的法线*
+
+虽然你需要了解动态合批，但没有什么可担心的。事实上，我们也要对法线做同样的事情。所以你可以让它保持启用状态。
 
 ## 1.3 世界空间下的法线
 
