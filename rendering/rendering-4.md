@@ -505,7 +505,128 @@ UnityShaderVariables 定义了一个 float4 \_WorldSpaceLightPos0 变量。它�
 
 ## 3.2 光滑度
 
+基于上述效应产生的高光面积大小取决于材质的粗糙度。光滑材料能更好地聚集光线，导致高光面积更小。我们可以把光滑度设置为材质的一个属性。这个值通常会设定为 0 到 1 之间，所以我们为它做个滑杆。
 
+```c
+	Properties {
+		_Tint ("Tint", Color) = (1, 1, 1, 1)
+		_MainTex ("Texture", 2D) = "white" {}
+		_Smoothness ("Smoothness", Range(0, 1)) = 0.5
+	}
+		
+		…
+
+			float _Smoothness;
+```
+
+点积的幂次越高，高光就越小。我们用光滑度来控制幂次，不过想达到理想的效果，1 是远远不够的，我们把它乘以 100.
+
+```c
+				return pow(
+					DotClamped(viewDir, reflectionDir),
+					_Smoothness * 100
+				);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/smoothness-slider.png)
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/smoothness.png)  
+相当光滑  
+
+## 3.3 Blinn-Phong
+
+我们目前计算反射光的依据是 Blinn 反射模型。不过其实最常用的模型叫 Blinn-Phong。它使用了光线方向和观察方向的中间值，称为半向量。高光的贡献度是由法线和半向量的夹角决定。
+
+```c
+//				float3 reflectionDir = reflect(-lightDir, i.normal);
+				float3 halfVector = normalize(lightDir + viewDir);
+
+				return pow(
+					DotClamped(halfVector, i.normal),
+					_Smoothness * 100
+				);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/halfway-vector.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/blinn-phong.png)  
+*Blinn-Phong 高光*
+
+这种算法的高光面积更大，但是可以通过提高光滑度来抵消。虽然两种算法都是近似，但 Blinn-Phong 的结果在视觉上比 Phong 更接近现实。不过它有一个很大的局限性，就是它可能会为从背面照亮的物体产生错误的高光。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/specular-error.png)  
+*错误的高光，光滑度为 0.01*  
+
+当光滑度比较低的时候，这种瑕疵就比较明显。想要掩饰这种瑕疵可以通过阴影，或者基于光线角度对高光进行衰减。Unity 的旧版 Shader 也有这个问题，所以我们一点不需要担心。而且我们很快就会转到另外一种光照方法。
+
+## 3.4 高光颜色
+
+显然高光反射的颜色应该和光线的颜色一致，所以让我们把它考虑进来。
+
+```c
+				float3 halfVector = normalize(lightDir + viewDir);
+				float3 specular = lightColor * pow(
+					DotClamped(halfVector, i.normal),
+					_Smoothness * 100
+				);
+
+				return float4(specular, 1);
+```
+
+不过这还没完，反射的颜色还取决于材质。这一点上和反照率不同的是，金属往往反照率非常微弱，但是具有强烈且通常带有颜色的高光反射率。相比之下，非金属倾向于具有明显的反照率，而高光反射率较弱而不带有颜色。
+
+我们可以添加纹理和色调以定义高光颜色，如同反照率一样。不过让我们先不用纹理，只用一个色调来解决。
+
+```c
+	Properties {
+		_Tint ("Tint", Color) = (1, 1, 1, 1)
+		_MainTex ("Albedo", 2D) = "white" {}
+		_SpecularTint ("Specular", Color) = (0.5, 0.5, 0.5)
+		_Smoothness ("Smoothness", Range(0, 1)) = 0.1
+	}
+
+	…
+
+			float4 _SpecularTint;
+			float _Smoothness;
+
+			…
+
+			float4 MyFragmentProgram (Interpolators i) : SV_TARGET {
+				…
+
+				float3 halfVector = normalize(lightDir + viewDir);
+				float3 specular = _SpecularTint.rgb * lightColor * pow(
+					DotClamped(halfVector, i.normal),
+					_Smoothness * 100
+				);
+
+				return float4(specular, 1);
+			}
+```
+
+我们可以用一个颜色属性同时控制高光反射的颜色和强度。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/specular-color.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/colored-specular.png)  
+*调了颜色的高光反射*
+  
+> **可以用色调的 a 通道存光滑度嘛？**  
+> 当然可以，在使用纹理存放高光颜色和光滑度的时候也可以这么干。  
+  
+## 3.5 漫反射和高光
+
+漫反射和高光就像光照拼图的两块。我们可以将它们加到一起，使我们的图像更加完整。
+
+```c
+				return float4(diffuse + specular, 1);
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/diffuse-specular-gamma.png)  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/diffuse-specular-linear.png)  
+*漫反射加高光，在伽马和线性空间下*  
+
+[unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/specular-shading.unitypackage)  
+
+# 4 能量守恒
 
 ---
   
