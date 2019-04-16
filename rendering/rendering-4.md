@@ -626,7 +626,206 @@ UnityShaderVariables 定义了一个 float4 \_WorldSpaceLightPos0 变量。它�
 
 [unitypackage](https://catlikecoding.com/unity/tutorials/rendering/part-4/specular-shading/specular-shading.unitypackage)  
 
+
 # 4 能量守恒
+
+仅仅是把漫反射和高光反射简单地加到一起是有问题的，最后得到的亮度可能超过了光源亮度。这个问题在高光为纯白而且光滑度非常低的时候非常明显。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/too-bright.png)  
+*白色高光，光滑度 0.1。过于亮了。*
+
+当光线击中表面时，其中的一部分作为高光被反射。另一部分渗透进表面，一些作为漫反射被射回，另外一些被吸收。但是我们目前的实现没有考虑到这一点，反射和漫反射都是火力全开。所以最后的亮度可能是两倍亮度。
+
+我们应该确保材质上漫反射和高光的和不超过 1，以保证我们不会无中生有地创造光。最后的和小于 1 是可以的，这意味着有一些光线被吸收了。
+
+由于我们使用的高光颜色是常数，我们可以简单地把反照率颜色定为 1 减高光。不过这个事情手工做有点麻烦，特别是如果我们想要自定义反照率颜色，所以我们在 Shader 里做这件事。
+
+```c
+				float3 albedo = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;
+				albedo *= 1 - _SpecularTint.rgb;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/not-too-bright.png)  
+*这回不会太亮了*
+
+漫反射和高光现在相互关联起来了。高光越强，漫反射越弱。纯黑的高光结果是零反射，同时漫反射达到最大。纯白的高光结果是完美的镜面，同时反照率就完全消失了。
+
+![](https://thumbs.gfycat.com/QuarterlyAppropriateBarebirdbat-small.gif)  
+*能量守恒*
+
+## 4.1 单通道
+
+目前为止的部分在高光是灰色时运行良好，不过当高光不是灰色时会制造出一些奇怪的结果。例如，红色的高光只会减少漫反射的红色分量，结果造成漫反射带上靛青色。
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/red-specular.png)  
+*红色高光，靛青色的反照率*
+
+为了避免这样的效果，我们可以使用单色的颜色守恒。具体说来就是削弱反照率的时候，统一使用高光的最强分量。
+
+```c
+				albedo *= 1 - max(_SpecularTint.r, max(_SpecularTint.g, _SpecularTint.b));
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/monochrome-energy-conservation.png)  
+*单通道能量守恒*
+
+## 4.2 辅助函数
+
+如你所愿，Unity 有关于能量守恒的辅助函数。名字这么长： EnergyConservationBetweenDiffuseAndSpecular ，所在文件是 UnityStandardUtils.cginc。
+
+```c
+			#include "UnityStandardBRDF.cginc"
+			#include "UnityStandardUtils.cginc"
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/include-files.png)  
+*库文件的继承链，从 UnityStandardUtils 开始*
+
+这个函数以反照率和高光颜色作为参数，输出调整过后的反照率。但是他还输出了另一个参数，称为 oneMinusReflectivity，含义如其名，是一减高光强度，也就是我们用来乘反照率的那个系数。之所以输出这个参数，是为了后续的其他光照计算。
+
+```c
+				float3 albedo = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;
+//				albedo *= 1 -
+//					max(_SpecularTint.r, max(_SpecularTint.g, _SpecularTint.b));
+
+				float oneMinusReflectivity;
+				albedo = EnergyConservationBetweenDiffuseAndSpecular(
+					albedo, _SpecularTint.rgb, oneMinusReflectivity
+				);
+```
+
+> EnergyConservationBetweenDiffuseAndSpecular 长什么样子？**  
+> 下面就是。他有三个模式：不守恒、单通道、着色，通过 #define 切换。默认的是单通道模式。   
+```c
+half SpecularStrength(half3 specular) {
+	#if (SHADER_TARGET < 30)
+		// SM2.0: instruction count limitation
+		// SM2.0: simplified SpecularStrength
+		// Red channel - because most metals are either monochrome
+		// or with redish/yellowish tint
+		return specular.r;
+	#else
+		return max(max(specular.r, specular.g), specular.b);
+	#endif
+}
+
+// Diffuse/Spec Energy conservation
+inline half3 EnergyConservationBetweenDiffuseAndSpecular (
+	half3 albedo, half3 specColor, out half oneMinusReflectivity
+) {
+	oneMinusReflectivity = 1 - SpecularStrength(specColor);
+	#if !UNITY_CONSERVE_ENERGY
+		return albedo;
+	#elif UNITY_CONSERVE_ENERGY_MONOCHROME
+		return albedo * oneMinusReflectivity;
+	#else
+		return albedo * (half3(1, 1, 1) - specColor);
+	#endif
+}
+```
+
+## 4.3 金属度工作流
+
+大体上来说，我们所关注的材质可以分为两种：金属和非金属。非金属也称为电介质。目前为止，我们可以用强烈的带颜色的高光创建金属材质，用单通道的弱高光创建电介质。这就是高光工作流。
+
+如果我们可以自由切换金属和非金属，事情会更简单。因为金属没有反照率，我们可以把颜色数据用作高光颜色。非金属没有带颜色的高光，也就不需要高光颜色。这样的工作流被称为金属工作流。我们来研究一下。
+
+> **哪种工作流更好？**  
+> 哪种都好，所以 Unity 为每种工作流都准备了一套标准 Shader。金属工作流更简单，因为你只需要一个颜色和一个滑杆，创建真实的金属足够了。高光工作流可以创造出差不多的效果，但是由于选项比较多，创造出的材质也可能不够真实。
+
+我们现在可以加一个滑杆属性作为金属度。取值范围通常是 0 **或** 1，因为一个材质要么是金属，要么不是。在其之间的数值代表了介于金属和非金属之间的混合材质。
+
+```c
+	Properties {
+		_Tint ("Tint", Color) = (1, 1, 1, 1)
+		_MainTex ("Albedo", 2D) = "white" {}
+//		_SpecularTint ("Specular", Color) = (0.5, 0.5, 0.5)
+		_Metallic ("Metallic", Range(0, 1)) = 0
+		_Smoothness ("Smoothness", Range(0, 1)) = 0.1
+	}
+
+	…
+
+//			float4 _SpecularTint;
+			float _Metallic;
+			float _Smoothness;
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/energy-conservation/metallic-slider.png)  
+*金属度滑杆*
+
+现在我们可以从反照率和金属度计算出高光颜色，再用（1-金属度）乘以反照率。
+
+```c
+				float3 specularTint = albedo * _Metallic;
+				float oneMinusReflectivity = 1 - _Metallic;
+//				albedo = EnergyConservationBetweenDiffuseAndSpecular(
+//					albedo, _SpecularTint.rgb, oneMinusReflectivity
+//				);
+				albedo *= oneMinusReflectivity;
+				
+				float3 diffuse =
+					albedo * lightColor * DotClamped(lightDir, i.normal);
+
+				float3 halfVector = normalize(lightDir + viewDir);
+				float3 specular = specularTint * lightColor * pow(
+					DotClamped(halfVector, i.normal),
+					_Smoothness * 100
+				);
+```
+
+不过，这样有点过于简化了。即使是纯的电介质也有一点点高光，所以高光强度和反射不能精确匹配金属度滑杆的值，而且还会受颜色空间的影响。幸运的是，UnityStandardUtils 还有一个 DiffuseAndSpecularFromMetallic 函数，可以为我们解决这个问题。
+
+```c
+				float3 specularTint; // = albedo * _Metallic;
+				float oneMinusReflectivity; // = 1 - _Metallic;
+//				albedo *= oneMinusReflectivity;
+				albedo = DiffuseAndSpecularFromMetallic(
+					albedo, _Metallic, specularTint, oneMinusReflectivity
+				);
+```
+
+![](https://thumbs.gfycat.com/JadedHighJabiru-small.gif)  
+*金属度工作流*
+
+> ** DiffuseAndSpecularFromMetallic 长什么样子？**  
+> 这就是，注意它使用了变量 half4 unity_ColorSpaceDielectricSpec ，它的值基于颜色空间，由 Unity 指定。
+```c
+inline half OneMinusReflectivityFromMetallic(half metallic) {
+	// We'll need oneMinusReflectivity, so
+	//   1-reflectivity = 1-lerp(dielectricSpec, 1, metallic)
+	//                  = lerp(1-dielectricSpec, 0, metallic)
+	// store (1-dielectricSpec) in unity_ColorSpaceDielectricSpec.a, then
+	//	 1-reflectivity = lerp(alpha, 0, metallic)
+	//                  = alpha + metallic*(0 - alpha)
+	//                  = alpha - metallic * alpha
+	half oneMinusDielectricSpec = unity_ColorSpaceDielectricSpec.a;
+	return oneMinusDielectricSpec - metallic * oneMinusDielectricSpec;
+}
+
+inline half3 DiffuseAndSpecularFromMetallic (
+	half3 albedo, half metallic,
+	out half3 specColor, out half oneMinusReflectivity
+) {
+	specColor = lerp(unity_ColorSpaceDielectricSpec.rgb, albedo, metallic);
+	oneMinusReflectivity = OneMinusReflectivityFromMetallic(metallic);
+	return albedo * oneMinusReflectivity;
+}
+```
+
+这里有一点细节问题，金属度滑杆是设计为在伽马空间下工作，但是在线性空间下渲染时， Unity 不会自动对单个值进行伽马校正。我们可以使用 Gamma 属性告诉 Unity ，我们的金属度滑杆应该进行伽马校正。
+
+```c
+	[Gamma] _Metallic ("Metallic", Range(0, 1)) = 0
+```
+
+不幸的是，现在非金属的镜面反射变得相当模糊。 为了改善这一点，我们需要一种更好的方法来计算光照。
+
+# 5 基于物理的渲染 PBS
+
+Blinn-Phong 长期以来一直是游戏行业的主力，但现在基于物理的着色——称为PBS——风靡一时。其理由也很充分，因为它更加真实并且可预测。理想情况下，游戏引擎和建模工具都使用相同的着色算法，使得创建内容变得更容易。行业也在向标准的 PBS 实现慢慢收敛。
+
+
 
 ---
   
