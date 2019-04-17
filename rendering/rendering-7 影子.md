@@ -1,5 +1,5 @@
 
-渲染之六 影子
+渲染之七 影子
 ======
 [原教程传送门](https://catlikecoding.com/unity/tutorials/rendering/part-7/)
 ---
@@ -17,4 +17,4 @@
 ![](https://catlikecoding.com/unity/tutorials/rendering/part-7/tutorial-image.jpg)  
 *渲染物体时，有个影子再好不过了*
 
-# 1 凹凸贴图
+# 1 方向光阴影
