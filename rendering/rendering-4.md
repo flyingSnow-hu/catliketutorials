@@ -731,7 +731,7 @@ inline half3 EnergyConservationBetweenDiffuseAndSpecular (
 如果我们可以自由切换金属和非金属，事情会更简单。因为金属没有反照率，我们可以把颜色数据用作高光颜色。非金属没有带颜色的高光，也就不需要高光颜色。这样的工作流被称为金属工作流。我们来研究一下。
 
 > **哪种工作流更好？**  
-> 哪种都好，所以 Unity 为每种工作流都准备了一套标准 Shader。金属工作流更简单，因为你只需要一个颜色和一个滑杆，创建真实的金属足够了。高光工作流可以创造出差不多的效果，但是由于选项比较多，创造出的材质也可能不够真实。
+> 哪种都好，所以 Unity 为每种工作流都准备了一套标准着色器。金属工作流更简单，因为你只需要一个颜色和一个滑杆，创建真实的金属足够了。高光工作流可以创造出差不多的效果，但是由于选项比较多，创造出的材质也可能不够真实。
 
 我们现在可以加一个滑杆属性作为金属度。取值范围通常是 0 **或** 1，因为一个材质要么是金属，要么不是。在其之间的数值代表了介于金属和非金属之间的混合材质。
 
@@ -823,9 +823,170 @@ inline half3 DiffuseAndSpecularFromMetallic (
 
 # 5 基于物理的渲染 PBS
 
-Blinn-Phong 长期以来一直是游戏行业的主力，但现在基于物理的着色——称为PBS——风靡一时。其理由也很充分，因为它更加真实并且可预测。理想情况下，游戏引擎和建模工具都使用相同的着色算法，使得创建内容变得更容易。行业也在向标准的 PBS 实现慢慢收敛。
+Blinn-Phong 长期以来一直是游戏行业的主力，但现在基于物理的着色——称为PBS——风靡一时。其理由也很充分，因为它更加真实并且可预测。理想情况下，游戏引擎和建模工具都使用相同的着色算法，使得创建内容变得更容易。整个行业也在向标准的 PBS 实现慢慢收敛。
 
+Unity 的标准着色器使用的也是 PBS 方法。Unity 内部实际上准备了多种实现，根据目标平台、硬件和 API 级别决定使用哪一个。当前算法可以通过宏 UNITY_BRDF_PBS 调用，这个宏定义在 UnityPBSLighting.cginc 里。BRDF 的全称是 Bidirectional Reflectance Distribution Function，双向反射分布函数。
 
+```c
+//			#include "UnityStandardBRDF.cginc"
+//			#include "UnityStandardUtils.cginc"
+			#include "UnityPBSLighting.cginc"
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/physically-based-shading/include-files.png)  
+*部分文件的继承关系，从 UnityPBSLighting 开始*  
+
+> **UNITY_BRDF_PBS 长什么样子？**  
+> 它是 Unity 的某一个 BRDF 函数的别名。默认指向 UNITY_PBS_USE_BRDF1。只要目标着色器大于等于 3.0，它就会自动选择当前平台下质量最高的。
+```c
+// Default BRDF to use:
+#if !defined (UNITY_BRDF_PBS)
+	// allow to explicitly override BRDF in custom shader
+	// still add safe net for low shader models,
+	// otherwise we might end up with shaders failing to compile
+	#if SHADER_TARGET < 30
+		#define UNITY_BRDF_PBS BRDF3_Unity_PBS
+	#elif UNITY_PBS_USE_BRDF3
+		#define UNITY_BRDF_PBS BRDF3_Unity_PBS
+	#elif UNITY_PBS_USE_BRDF2
+		#define UNITY_BRDF_PBS BRDF2_Unity_PBS
+	#elif UNITY_PBS_USE_BRDF1
+		#define UNITY_BRDF_PBS BRDF1_Unity_PBS
+	#elif defined(SHADER_TARGET_SURFACE_ANALYSIS)
+		// we do preprocess pass during shader analysis and we dont
+		// actually care about brdf as we need only inputs/outputs
+		#define UNITY_BRDF_PBS BRDF1_Unity_PBS
+	#else
+		#error something broke in auto-choosing BRDF
+	#endif
+#endif
+```
+
+这里没有包括实际的函数，因为他们都很大。你可以在网上下载 Unity 的 include 文件，或者在 Unity 的安装文件里找到这些函数。他们应该在 UnityStandardBRDF 文件里。
+
+这些函数内容非常数学向，所以我不会深入细节。他们仍然在计算漫反射和高光，只不过以一种非 Blinn-Phong 的方式。另外还有一个菲涅尔反射的组件，它会随着掠射角增加反射度。如果我们考虑到环境反射，这些效果就会显现出来了。
+
+为了让 Unity 使用最好的 BRDF 函数，我们至少要启用着色器 3.0 。添加一行 pragma 语句。
+
+```c
+			CGPROGRAM
+
+			#pragma target 3.0
+
+			#pragma vertex MyVertexProgram
+			#pragma fragment MyFragmentProgram
+```
+
+Unity 的 BRDF 返回一个 RGBA 颜色，A 通道恒定为 1。所以我们可以直接让片段着色器返回函数结果。
+
+```c
+//				float3 diffuse =
+//					albedo * lightColor * DotClamped(lightDir, i.normal);
+
+//				float3 halfVector = normalize(lightDir + viewDir);
+//				float3 specular = specularTint * lightColor * pow(
+//					DotClamped(halfVector, i.normal),
+//					_Smoothness * 100
+//				);
+
+				return UNITY_BRDF_PBS();
+```
+
+当然我们还需要给他传参数。这系列函数都有八个参数，头两个是漫反射和高光颜色，我们已经有了。
+```c
+				return UNITY_BRDF_PBS(
+					albedo, specularTint
+				);
+```
+
+接下来两个是反射度和粗糙度。出于优化需要，这两个是以“一减”的形式提供。我们已经通过 DiffuseAndSpecularFromMetallic 获取了 oneMinusReflectivity。而“1 - 粗糙度”就是光泽度 smoothness。所以这两个参数也是直接用。
+```c
+				return UNITY_BRDF_PBS(
+					albedo, specularTint,
+					oneMinusReflectivity, _Smoothness
+				);
+```
+
+当然法线和视角也是肯定需要的，这是第五和第六个参数。
+```c
+				return UNITY_BRDF_PBS(
+					albedo, specularTint,
+					oneMinusReflectivity, _Smoothness,
+					i.normal, viewDir
+				);
+```
+
+最后两个参数是直接光和间接光。
+
+## 5.1 光的数据结构
+
+UnityLightingCommon 中定义了一个简单的数据结构 UnityLight，Unity着色器使用它来传递光数据。它包括一束光的颜色、方向和一个 ndotl 值，也就是漫反射系数。记住，这些结构只是为了方便，不会影响最后编译出的代码。
+
+（ndotl 在最新的 Unity 里已经不需要了）
+
+这些信息我们都有，所以要做的就是把他们组织成结构，作为第七个参数传入。
+
+```c
+				UnityLight light;
+				light.color = lightColor;
+				light.dir = lightDir;
+				light.ndotl = DotClamped(i.normal, lightDir);
+				
+				return UNITY_BRDF_PBS(
+					albedo, specularTint,
+					oneMinusReflectivity, _Smoothness,
+					i.normal, viewDir,
+					light
+				);
+```
+
+> **为何需要漫反射系数？**  
+> （已经不需要了，这段略略略）
+
+最后一个参数是间接光。需要传入一个 UnityIndirect 结构。它也定义在 UnityLightingCommon 里。它包括两个颜色，一个漫反射一个高光。漫反射值代表环境光，高光值代表环境反射。
+
+我们之后再研究间接光，所以现在简单置黑即可。
+
+```c
+			float4 MyFragmentProgram (Interpolators i) : SV_TARGET {
+				i.normal = normalize(i.normal);
+				float3 lightDir = _WorldSpaceLightPos0.xyz;
+				float3 viewDir = normalize(_WorldSpaceCameraPos - i.worldPos);
+
+				float3 lightColor = _LightColor0.rgb;
+				float3 albedo = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;
+
+				float3 specularTint;
+				float oneMinusReflectivity;
+				albedo = DiffuseAndSpecularFromMetallic(
+					albedo, _Metallic, specularTint, oneMinusReflectivity
+				);
+				
+				UnityLight light;
+				light.color = lightColor;
+				light.dir = lightDir;
+				light.ndotl = DotClamped(i.normal, lightDir);
+				UnityIndirect indirectLight;
+				indirectLight.diffuse = 0;
+				indirectLight.specular = 0;
+
+				return UNITY_BRDF_PBS(
+					albedo, specularTint,
+					oneMinusReflectivity, _Smoothness,
+					i.normal, viewDir,
+					light, indirectLight
+				);
+			}
+```
+
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/physically-based-shading/nonmetal-gamma.png)  
+*非金属，伽马空间*  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/physically-based-shading/nonmetal-linear.png)  
+*非金属，线性空间*   
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/physically-based-shading/metal-gamma.png)  
+*金属，伽马空间*  
+![](https://catlikecoding.com/unity/tutorials/rendering/part-4/physically-based-shading/metal-linear.png)  
+*金属，线性空间*  
 
 ---
   
