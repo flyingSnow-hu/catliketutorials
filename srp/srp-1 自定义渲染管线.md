@@ -1,5 +1,6 @@
 SRP之一 控制渲染
 ======
+
 [原教程传送门](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/)
 ---
 
@@ -14,10 +15,10 @@ SRP之一 控制渲染
 
 本教程是用Unity 2019.2.6f1制作的。
 
-> ** 其他SRP系列呢？ **
+> **其他SRP系列呢？**
 > 我有另一个涵盖可脚本渲染管道(SRP)的教程系列，但那个系列使用实验性的SRP API，它只适用于Unity 2018。这个系列是针对Unity 2019及以后的版本。这个系列采用了不同的、更现代的方法，但会涵盖很多相同的主题。如果你等不到这个系列赶上2018年的系列，那么2018年的系列仍然是有用的。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/tutorial-image.jpg)
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/tutorial-image.jpg)  
 *以一个自定义的渲染管线渲染*
 
 
@@ -38,26 +39,26 @@ SRP之一 控制渲染
 
 我们专门在线性颜色空间中工作，但Unity 2019.2仍然以伽马空间作为默认值。通过 "Edit/Project Settings "进入播放器设置，然后选择“Player”，然后将 "Other Settings"部分下的 "Color Space"切换为 "Linear"。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/color-space.png)
-* 设置线性颜色空间 *
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/color-space.png)  
+*设置线性颜色空间*
 
 在默认场景中填充一些物体，使用标准的、没有光照的、不透明和透明的混合材质。Unlit/Transparent着色器需要一张贴图，所以这里使用了一张球形UV贴图。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/sphere-alpha-map.png)
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/sphere-alpha-map.png)  
 *带透明度的球形UV贴图，黑色背景。*
 
 我在测试场景中放了几个立方体，它们都是不透明的。红色的材质使用的是 Standard 着色器，而绿色和黄色的使用 Unlit/Color 。蓝色的球体使用 Standard 着色器，Rendering Mode 设置为 Transparent，而白色的球体则使用 Unlit/Transparent 着色器。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/scene.png)
-* 测试场景 *
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/scene.png)  
+*测试场景*
 
 
 ## 1.2 管线资产
 
 目前，Unity使用的是默认的渲染管线。要用自定义的渲染管线来代替它，我们首先要为它创建一个资产类。我们将使用与 Unity 使用的通用 RP 大致相同的文件夹结构。创建一个 Custom RP 资产文件夹，其中有一个 Runtime 子文件夹。在那里为 CustomRenderPipelineAsset 类型新建一个C#脚本。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/folder-structure.png)
-* 文件夹结构 *
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/folder-structure.png)  
+*文件夹结构*
 
 资产类必须继承  UnityEngine.Rendering 名字空间下的 RenderPipelineAsset 类。
 
@@ -94,8 +95,8 @@ public class CustomRenderPipelineAsset : RenderPipelineAsset { … }
 
 使用新菜单项将资产添加到项目中，然后找到 *Project Settings/Graphics*，并在 *Scriptable Render Pipeline Settings* 下选择它。
 
-![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/srp-settings.png)
-* 选择了自定义RP *
+![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/a-new-render-pipeline/srp-settings.png)  
+*选择了自定义RP*
 
 取代默认 RP 之后一些事情改变了。首先，图形设置中的很多选项都消失了，这些在一个信息面板中会提到。其次，我们已经禁用了默认的RP，而没有提供有效的替代物，所以不会有任何东西被渲染。游戏窗口、场景窗口和材质预览都不再有功能。如果你打开帧调试器—— Window/Analysis/Frame Debugger——并启用它，你会看到游戏窗口中确实没有绘制任何东西。
 
@@ -205,7 +206,7 @@ CameraRenderer.Render 的工作是绘制其相机能看到的所有几何体。�
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/skybox.png)  
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/skybox-debugger.png)  
-* 绘制了天空盒 *
+*绘制了天空盒*
 
 请注意，目前摄像机的方向并不会影响天空盒的渲染方式。我们将摄像机传递给 DrawSkybox，只是用来读取相机的清除标志，以决定是否应该绘制天空盒。
 
@@ -214,7 +215,7 @@ CameraRenderer.Render 的工作是绘制其相机能看到的所有几何体。�
 目前，unity_MatrixVP 矩阵始终是相同的。我们必须通过 SetupCameraProperties 方法，将摄像机的属性应用到上下文中。这将设置矩阵以及其他一些属性。在调用 DrawVisibleGeometry 之前，请在一个单独的 Setup 方法中进行。
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/skybox-aligned.png)  
-* 方向正确的天空盒 *
+*方向正确的天空盒*
 
 ## 2.3 指令缓冲
 
@@ -230,9 +231,9 @@ CameraRenderer.Render 的工作是绘制其相机能看到的所有几何体。�
 	};
 ```
 
-> ** 那实例初始化器的语法是怎么用的呢？**
-> 就像我们在调用构造函数后，把```buffer.name = bufferName;```写成了一条单独的语句。但是在创建一个新对象的时候，你可以在构造函数的调用中附加一个代码块。然后在代码块中设置对象的字段和属性，而不必显式引用对象实例。它明确了只有在设置了这些字段和属性之后才能使用实例。除此以外，它使得只使用单条语句初始化成为可能（例如我们在这里使用的字段初始化）而不需要具有许多参数变体的构造函数。
-
+> **那实例初始化器的语法是怎么用的呢？**  
+> 就像我们在调用构造函数后，把 ```buffer.name = bufferName;``` 写成了一条单独的语句。但是在创建一个新对象的时候，你可以在构造函数的调用中附加一个代码块。然后在代码块中设置对象的字段和属性，而不必显式引用对象实例。它明确了只有在设置了这些字段和属性之后才能使用实例。除此以外，它使得只使用单条语句初始化成为可能（例如我们在这里使用的字段初始化）而不需要具有许多参数变体的构造函数。
+>
 > 请注意，我们省略了调用构造函数时的空参数列表，这在使用对象初始化器语法时是允许的。
 
 我们可以使用命令缓冲区来注入 profiler 采样，这些采样将同时显示在 profiler 和帧调试器中。其方法是在适当的时间点调用 BeginSample 和 EndSample。在我们的例子中，就是在 Setup 和 Submit 的开头。这两个方法必须提供相同的采样名字，这里我们将使用缓冲区的名字。
@@ -273,7 +274,7 @@ CameraRenderer.Render 的工作是绘制其相机能看到的所有几何体。�
 Camera.RenderSkyBox 采样现在内含于 Render Camera 了。
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/render-camera-sample.png)  
-* Render Camera 采样 *
+*Render Camera 采样*
 
 ## 2.4 清理渲染目标
 
@@ -291,7 +292,7 @@ CommandBuffer.ClearRenderTarget 至少需要三个参数。前两个参数表示
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/clearing-nested-sample.png)  
-* 清除，附带嵌套采样 *
+*清除，附带嵌套采样*
 
 帧调试器现在为清除动作显示了一个 Draw GL 条目，该条目嵌套在 Render Camera 的一个额外级别中。之所以会出现这种情况，是因为 ClearRenderTarget 以命令缓冲区的名字包装其采样。我们可以在开始我们自己的采样之前调用清除，以摆脱多余的嵌套。这样就会产生两个相邻的 Render Camera 采样域，然后这两个域会被合并。
 
@@ -306,7 +307,7 @@ CommandBuffer.ClearRenderTarget 至少需要三个参数。前两个参数表示
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/clearing-one-sample.png)  
-* 清除，没有嵌套采样 *
+*清除，没有嵌套采样*
 
  *Draw GL* 条目代表用 Hidden/InternalClear 着色器绘制了一个全屏四边形，该着色器会写入渲染目标，但这并不是最有效的清除方式。之所以使用这种方法，是因为我们是在设置相机属性之前进行清除。如果我们把这两步的顺序互换一下，就可以得到一种高效的清除方式。
 
@@ -321,7 +322,7 @@ CommandBuffer.ClearRenderTarget 至少需要三个参数。前两个参数表示
 ```
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/clearing-correct.png)  
-* 正确的清除 *
+*正确的清除*
 
 现在我们看到 *Clear (color+Z+stencil)*，这表示颜色和深度缓冲区都被清除了。Z代表深度缓冲区，模板数据也是同一缓冲区的一部分。
 
@@ -341,7 +342,7 @@ CommandBuffer.ClearRenderTarget 至少需要三个参数。前两个参数表示
 	}
 ```
 
-> out 是做甚么的？（翻译略）
+> **out 是做甚么的？**（翻译略）
 
 变量作为输出参数时，可以将声明内嵌在参数列表里面，我们就这样做。
 
@@ -374,7 +375,7 @@ CommandBuffer.ClearRenderTarget 至少需要三个参数。前两个参数表示
 
 实际的剔除工作是通过调用上下文的 Cull 方法来完成的，这个方法会返回一个 CullingResults 结构。所以如果剔除成功的话，就在我们的 Cull 中调用上下文的 Cull，并将结果存储在一个字段中。在这种情况下，我们必须将 culling 作为一个引用参数传递，在它前面写上ref。
 
-> ref 又是做甚么的？（翻译略）
+> **ref 又是做甚么的？**（翻译略）
 
 ## 2.6 绘制几何图形
 
@@ -419,7 +420,7 @@ var filteringSettings = new FilteringSettings(RenderQueueRange.all);
 
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/drawing-unlit.png)  
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/drawing-unlit-debugger.png)  
-* 绘制无光照物体 *
+*绘制无光照物体*
 
 只有使用无光照着色器的可见对象才会被绘制。所有的绘制调用都在帧调试器中列出，归入 RenderLoop.Draw 下。有一些奇怪的事情发生在透明对象身上，不过我们首先关注一下对象的绘制顺序。这是由帧调试器显示的，你可以通过单选或者方向键来逐步查看绘制调用。
 
@@ -429,7 +430,7 @@ var filteringSettings = new FilteringSettings(RenderQueueRange.all);
 
 [视频](https://gfycat.com/rawimpishalpinegoat)  
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/sorting.png)  
-* 通用的透明度排序 *
+*通用的透明度排序*
 
 物体现在可以大体上从前向后绘制，这对于不透明的物体来说非常理想。如果某个东西最终被绘制在其他东西后面，其隐藏的片段可以被跳过，从而加快渲染速度。CommonOpaque 选项还考虑了一些其他原则，包括渲染队列和材质。
 
@@ -459,9 +460,9 @@ var filteringSettings = new FilteringSettings(RenderQueueRange.opaque);
 
 [视频](https://gfycat.com/disloyalremarkableavocet)  
 ![](https://catlikecoding.com/unity/tutorials/custom-srp/custom-render-pipeline/rendering/opaque-skybox-transparent.png)  
-* 不透明物体，然后是天空盒，然后是透明物体 *
+*不透明物体，然后是天空盒，然后是透明物体*
 
-> ** 为什么绘制顺序要反过来？ **
+> **为什么绘制顺序要反过来？**
 > 由于透明对象不会写入深度缓冲区，因此对它们进行从前到后排序对性能没有好处。但是，当透明对象最终在视觉上有交叠时，它们必须从后到前地绘制才能正确混合。
 >
 > 不幸的是，从后到前排序并不能保证混合正确，因为排序是针对每个对象的，而且只基于对象本身的位置。相交的和大的透明对象仍然会产生不正确的结果。有时可以通过将几何体切割成较小的部分来解决这个问题。
